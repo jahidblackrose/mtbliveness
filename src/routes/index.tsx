@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { toast } from "sonner";
