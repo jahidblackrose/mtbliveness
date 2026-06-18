@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { toast } from "sonner";
@@ -382,6 +382,20 @@ function SelfieStep({
         Center your face in the frame, look straight at the camera, and make sure
         you're in a well-lit area.
       </p>
+      <Link to="/liveface" className="block">
+        <Button variant="default" className="w-full">
+          <ScanFace className="mr-2 h-4 w-4" aria-hidden="true" />
+          Face Verify Liveness
+        </Button>
+      </Link>
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-card px-2 text-muted-foreground">or</span>
+        </div>
+      </div>
       <SelfieCapture busy={busy} onCapture={onCapture} />
     </div>
   );
