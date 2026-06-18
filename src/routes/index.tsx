@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { toast } from "sonner";
-import { CheckCircle2, LogOut, Phone, ShieldCheck } from "lucide-react";
+import { CheckCircle2, LogOut, Phone, ShieldCheck, ScanFace } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,22 +10,33 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { supabase } from "@/integrations/supabase/client";
 import { generateOtp, isValidPhone } from "@/lib/phone";
+import { SelfieCapture } from "@/components/selfie-capture";
 
 export const Route = createFileRoute("/")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Phone Verification Demo" },
-      { name: "description", content: "Sign in with Google and verify your mobile number via OTP." },
+      { title: "MTB eKYC" },
+      { name: "description", content: "MTB eKYC — verify your identity with Google sign-in, mobile OTP, and a live selfie." },
     ],
   }),
   component: Index,
 });
 
-type Profile = { phone: string | null; phone_verified: boolean };
-type Step = "loading" | "phone" | "otp" | "verified";
+type Profile = {
+  phone: string | null;
+  phone_verified: boolean;
+  selfie_path: string | null;
+  kyc_completed: boolean;
+};
+type Step = "loading" | "phone" | "otp" | "selfie" | "completed";
 
-const EMPTY_PROFILE: Profile = { phone: null, phone_verified: false };
+const EMPTY_PROFILE: Profile = {
+  phone: null,
+  phone_verified: false,
+  selfie_path: null,
+  kyc_completed: false,
+};
 
 function Index() {
   const navigate = useNavigate();
@@ -38,6 +49,7 @@ function Index() {
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
   const expectedOtpRef = useRef<string>("");
 
   useEffect(() => {
@@ -52,14 +64,26 @@ function Index() {
       setUser(data.user);
       const { data: p } = await supabase
         .from("profiles")
-        .select("phone, phone_verified")
+        .select("phone, phone_verified, selfie_path, kyc_completed")
         .eq("id", data.user.id)
         .maybeSingle();
       if (cancelled) return;
       const prof = (p as Profile | null) ?? EMPTY_PROFILE;
       setProfile(prof);
       setPhone(prof.phone ?? "");
-      setStep(prof.phone_verified ? "verified" : "phone");
+      if (prof.kyc_completed) {
+        setStep("completed");
+      } else if (prof.phone_verified) {
+        setStep("selfie");
+      } else {
+        setStep("phone");
+      }
+      if (prof.selfie_path) {
+        const { data: signed } = await supabase.storage
+          .from("kyc-selfies")
+          .createSignedUrl(prof.selfie_path, 60 * 10);
+        if (!cancelled && signed?.signedUrl) setSelfieUrl(signed.signedUrl);
+      }
     })();
     return () => {
       cancelled = true;
@@ -103,20 +127,61 @@ function Index() {
       return;
     }
     expectedOtpRef.current = "";
-    setProfile({ phone: trimmed, phone_verified: true });
-    setStep("verified");
+    setProfile((p) => ({ ...p, phone: trimmed, phone_verified: true }));
+    setStep("selfie");
     toast.success("Phone number verified");
   }, [otp, phone, user]);
+
+  const uploadSelfie = useCallback(
+    async (blob: Blob) => {
+      if (!user) return;
+      setBusy(true);
+      const path = `${user.id}/selfie-${Date.now()}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from("kyc-selfies")
+        .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      if (upErr) {
+        setBusy(false);
+        toast.error(upErr.message);
+        return;
+      }
+      const { error: dbErr } = await supabase
+        .from("profiles")
+        .update({
+          selfie_path: path,
+          kyc_completed: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+      if (dbErr) {
+        setBusy(false);
+        toast.error(dbErr.message);
+        return;
+      }
+      const { data: signed } = await supabase.storage
+        .from("kyc-selfies")
+        .createSignedUrl(path, 60 * 10);
+      setBusy(false);
+      setProfile((p) => ({ ...p, selfie_path: path, kyc_completed: true }));
+      setSelfieUrl(signed?.signedUrl ?? null);
+      setStep("completed");
+      toast.success("eKYC complete");
+    },
+    [user],
+  );
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     navigate({ to: "/auth", replace: true });
   }, [navigate]);
 
-  const reset = useCallback(async () => {
+  const restartKyc = useCallback(async () => {
     if (!user) return;
-    await supabase.from("profiles").update({ phone_verified: false }).eq("id", user.id);
-    setProfile((p) => ({ ...p, phone_verified: false }));
+    await supabase
+      .from("profiles")
+      .update({ phone_verified: false, kyc_completed: false })
+      .eq("id", user.id);
+    setProfile((p) => ({ ...p, phone_verified: false, kyc_completed: false }));
     setOtp("");
     expectedOtpRef.current = "";
     setStep("phone");
@@ -134,14 +199,19 @@ function Index() {
   }
 
   const displayName = user?.user_metadata?.full_name ?? user?.email ?? "there";
+  const stepIndex =
+    step === "phone" ? 1 : step === "otp" ? 2 : step === "selfie" ? 3 : 3;
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-muted/30 px-4 py-12">
       <Card className="w-full max-w-md">
         <CardHeader>
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+            MTB eKYC
+          </p>
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <CardTitle className="truncate text-xl">Hi, {displayName}</CardTitle>
+              <CardTitle className="truncate text-xl">Welcome, {displayName}</CardTitle>
               <CardDescription className="break-all">{user?.email}</CardDescription>
             </div>
             <Button
@@ -154,6 +224,14 @@ function Index() {
               <LogOut className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
+          {step !== "completed" && (
+            <p
+              className="pt-2 text-xs text-muted-foreground"
+              aria-label={`Step ${stepIndex} of 3`}
+            >
+              Step {stepIndex} of 3
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           {step === "phone" && (
@@ -175,8 +253,15 @@ function Index() {
               busy={busy}
             />
           )}
-          {step === "verified" && (
-            <VerifiedStep phone={profile.phone} onChange={reset} />
+          {step === "selfie" && (
+            <SelfieStep busy={busy} onCapture={uploadSelfie} />
+          )}
+          {step === "completed" && (
+            <CompletedStep
+              phone={profile.phone}
+              selfieUrl={selfieUrl}
+              onRestart={restartKyc}
+            />
           )}
         </CardContent>
       </Card>
@@ -280,18 +365,63 @@ function OtpStep({
   );
 }
 
-function VerifiedStep({ phone, onChange }: { phone: string | null; onChange: () => void }) {
+function SelfieStep({
+  busy,
+  onCapture,
+}: {
+  busy: boolean;
+  onCapture: (blob: Blob) => void | Promise<void>;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <ScanFace className="h-4 w-4" aria-hidden="true" />
+        Take a live selfie
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Center your face in the frame, look straight at the camera, and make sure
+        you're in a well-lit area.
+      </p>
+      <SelfieCapture busy={busy} onCapture={onCapture} />
+    </div>
+  );
+}
+
+function CompletedStep({
+  phone,
+  selfieUrl,
+  onRestart,
+}: {
+  phone: string | null;
+  selfieUrl: string | null;
+  onRestart: () => void;
+}) {
   return (
     <div className="space-y-4 text-center" role="status" aria-live="polite">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
         <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
       </div>
       <div>
-        <p className="font-medium">Phone verified</p>
-        <p className="text-sm text-muted-foreground">{phone}</p>
+        <p className="font-medium">eKYC complete</p>
+        <p className="text-sm text-muted-foreground">
+          Your identity has been verified.
+        </p>
       </div>
-      <Button variant="outline" onClick={onChange} className="w-full">
-        Change number
+      {selfieUrl && (
+        <img
+          src={selfieUrl}
+          alt="Your verified selfie"
+          className="mx-auto h-28 w-28 rounded-full object-cover ring-2 ring-primary/30"
+        />
+      )}
+      <dl className="rounded-md border bg-muted/40 p-3 text-left text-sm">
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">Mobile</dt>
+          <dd className="font-medium">{phone}</dd>
+        </div>
+      </dl>
+      <Button variant="outline" onClick={onRestart} className="w-full">
+        Restart eKYC
       </Button>
     </div>
   );

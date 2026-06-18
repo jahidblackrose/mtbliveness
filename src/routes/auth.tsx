@@ -10,8 +10,8 @@ import { GoogleIcon } from "@/components/google-icon";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Sign in" },
-      { name: "description", content: "Sign in with Google to continue." },
+      { title: "MTB eKYC — Sign in" },
+      { name: "description", content: "Sign in to MTB eKYC with your Google account to begin verification." },
     ],
   }),
   component: AuthPage,
@@ -54,8 +54,13 @@ function AuthPage() {
     <main className="flex min-h-dvh items-center justify-center bg-muted/30 px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Welcome</CardTitle>
-          <CardDescription>Sign in with your Google account to continue</CardDescription>
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+            MTB eKYC
+          </p>
+          <CardTitle className="text-2xl">Welcome to MTB eKYC</CardTitle>
+          <CardDescription>
+            Sign in with Google to verify your identity in 3 quick steps.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={signIn} disabled={loading} className="w-full" size="lg">
