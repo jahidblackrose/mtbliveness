@@ -252,6 +252,9 @@ export type ChallengeState = {
   parallaxOk?: boolean;
   // turn feedback: user is turning the wrong way relative to instruction
   wrongWay?: boolean;
+  wrongHint?: "wrongDir" | "turnOtherWay" | "nodNotSide";
+  startedNearNeutral?: boolean;
+  headDebug?: HeadGestureDebug;
   // nod transition tracker
   nodPhase?: "neutral" | "down" | "up";
   nodPitchEma?: number;
@@ -360,6 +363,140 @@ export function setEasyMode(on: boolean) {
     TH.NOSE_NOD_ABS = 0.10;
     TH.DEPTH_MIN_RATIO = 0.55;
   }
+}
+
+export type DominantAxis = "yaw" | "pitch" | "none";
+export type ResolvedGesture = "TURN-LEFT" | "TURN-RIGHT" | "LOOK-UPDOWN" | "none";
+export type HeadGestureDebug = {
+  signedYaw: number;
+  signedPitch: number;
+  yawChange: number;
+  pitchChange: number;
+  dominantAxis: DominantAxis;
+  resolved: ResolvedGesture;
+  pass: boolean;
+  correctAxis: boolean;
+  correctSign: boolean;
+  startedNearNeutral: boolean;
+  wrongHint?: "wrongDir" | "turnOtherWay" | "nodNotSide";
+};
+
+function square(v: number) {
+  return v * v;
+}
+
+function axisDominance(yawChange: number, pitchChange: number): DominantAxis {
+  const yaw2 = square(yawChange);
+  const pitch2 = square(pitchChange);
+  if (yaw2 > pitch2 * 1.05) return "yaw";
+  if (pitch2 > yaw2 * 1.05) return "pitch";
+  return "none";
+}
+
+function nearNeutral(yawChange: number, pitchChange: number, yawTh: number, pitchTh: number) {
+  const yawNeutral = yawTh * 0.35;
+  const pitchNeutral = pitchTh * 0.35;
+  return square(yawChange) <= square(yawNeutral) && square(pitchChange) <= square(pitchNeutral);
+}
+
+function resolvedGesture(
+  yawChange: number,
+  pitchChange: number,
+  yawTh: number,
+  pitchTh: number,
+  dominantAxis: DominantAxis,
+): ResolvedGesture {
+  if (dominantAxis === "yaw") {
+    if (yawChange > yawTh) return "TURN-LEFT";
+    if (-yawChange > yawTh) return "TURN-RIGHT";
+  }
+  if (dominantAxis === "pitch" && (pitchChange > pitchTh || -pitchChange > pitchTh)) {
+    return "LOOK-UPDOWN";
+  }
+  return "none";
+}
+
+function calibrateYawSignFromNose(
+  m: FaceMetrics,
+  baseline: Baseline,
+  targetDir: 1 | -1,
+  yawTh: number,
+  pitchTh: number,
+) {
+  if (DIRECTION.calibratedYaw) return;
+  const rawYawChange = m.yaw - baseline.yaw;
+  const yawChange = rawYawChange * DIRECTION.YAW_LEFT_SIGN;
+  const pitchChange = m.pitch - baseline.pitch;
+  const noseChange = (m.noseDx - baseline.noseDx) * DIRECTION.NOSE_LEFT_SIGN;
+  const noseTh = TH.NOSE_TURN_ABS;
+
+  // Use nose offset only as a sign reference for mirrored/device variance.
+  // Passing still depends on canonical signed yaw only.
+  const noseSupportsPrompt = noseChange * targetDir > noseTh;
+  const yawOpposesPrompt = yawChange * targetDir < -yawTh * 0.5;
+  const yawSupportsPrompt = yawChange * targetDir > yawTh;
+  const horizontalEnough = square(yawChange) > square(pitchChange) && square(noseChange) > square(noseTh);
+
+  if (horizontalEnough && noseSupportsPrompt && yawOpposesPrompt) {
+    DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
+    DIRECTION.calibratedYaw = true;
+  } else if (horizontalEnough && yawSupportsPrompt && square(pitchChange) < square(pitchTh)) {
+    DIRECTION.calibratedYaw = true;
+  }
+}
+
+export function inspectHeadGesture(
+  m: FaceMetrics,
+  baseline: Baseline,
+  requested?: Extract<ChallengeKind, "turnLeft" | "turnRight" | "nod">,
+  startedNearNeutral = true,
+  mul = 1,
+): HeadGestureDebug {
+  const yawTh = TH.YAW_TURN_ABS * mul;
+  const pitchTh = TH.PITCH_NOD_ABS * mul;
+  const signedYaw = m.yaw * DIRECTION.YAW_LEFT_SIGN;
+  const signedPitch = m.pitch;
+  const yawChange = (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN;
+  const pitchChange = m.pitch - baseline.pitch;
+  const dominantAxis = axisDominance(yawChange, pitchChange);
+  const resolved = resolvedGesture(yawChange, pitchChange, yawTh, pitchTh, dominantAxis);
+
+  let pass = false;
+  let correctAxis = false;
+  let correctSign = false;
+  let wrongHint: HeadGestureDebug["wrongHint"];
+
+  if (requested === "turnLeft" || requested === "turnRight") {
+    const targetDir = requested === "turnLeft" ? 1 : -1;
+    correctAxis = dominantAxis === "yaw";
+    correctSign = yawChange * targetDir > yawTh;
+    pass = startedNearNeutral && correctAxis && correctSign;
+    if (!pass && dominantAxis === "yaw" && yawChange * -targetDir > yawTh) wrongHint = "turnOtherWay";
+    else if (!pass && resolved !== "none") wrongHint = "wrongDir";
+  } else if (requested === "nod") {
+    correctAxis = dominantAxis === "pitch";
+    correctSign = pitchChange > pitchTh || -pitchChange > pitchTh;
+    pass = startedNearNeutral && correctAxis && correctSign;
+    if (!pass && dominantAxis === "yaw" && (yawChange > yawTh || -yawChange > yawTh)) {
+      wrongHint = "nodNotSide";
+    } else if (!pass && resolved !== "none") {
+      wrongHint = "wrongDir";
+    }
+  }
+
+  return {
+    signedYaw,
+    signedPitch,
+    yawChange,
+    pitchChange,
+    dominantAxis,
+    resolved,
+    pass,
+    correctAxis,
+    correctSign,
+    startedNearNeutral,
+    wrongHint,
+  };
 }
 
 // Auto-assist factor based on how long the user has been attempting.
