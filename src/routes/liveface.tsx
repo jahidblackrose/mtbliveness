@@ -325,7 +325,7 @@ function LiveFaceAI() {
       }
     } else if (ref && !cur) {
       // Reference exists but no face at the capture instant — treat as mismatch.
-      integrityRestart("mismatch");
+      integrityRestartRef.current?.("mismatch");
       return;
     }
 
