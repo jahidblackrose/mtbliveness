@@ -425,7 +425,10 @@ function LiveFaceAI() {
         }
       } else if (currentStep === "liveness") {
         const baseline = baselineRef.current;
-        if (m && baseline) {
+        const isPaused = pausedRef.current;
+        const inSoftTimeout = softTimeoutRef.current != null;
+
+        if (m && baseline && !isPaused && !inSoftTimeout) {
           spoofRef.current.push(m.fingerprint, brightness);
           const spoof = spoofRef.current.check(m, baseline);
           if (spoof) {
@@ -442,34 +445,49 @@ function LiveFaceAI() {
           );
         }
 
-        if (g.ok && m && baseline && ts >= breatherUntilRef.current) {
-          const idx = challengesRef.current.findIndex((c) => !c.done);
-          if (idx === -1) {
-            if (!captureScheduled) {
-              captureScheduled = true;
-              let n = 2;
-              setCountdown(n);
-              const iv = window.setInterval(() => {
-                n -= 1;
-                if (n <= 0) {
-                  window.clearInterval(iv);
-                  setCountdown(null);
-                  setFlash(true);
-                  setTimeout(() => setFlash(false), 200);
-                  const recentOk = captureBufRef.current.filter((s) => s.centered).length;
-                  if (recentOk >= 3 && stepRef.current === "liveness") capture();
-                  else {
-                    captureScheduled = false;
-                    framingHoldStartRef.current = null;
-                    setStep("framing");
-                  }
-                } else {
-                  setCountdown(n);
+        const idx = challengesRef.current.findIndex((c) => !c.done);
+
+        // Detection + timer only run when actively engaged.
+        const canRun =
+          !isPaused &&
+          !inSoftTimeout &&
+          g.ok &&
+          m &&
+          baseline &&
+          ts >= breatherUntilRef.current;
+
+        if (canRun && idx === -1) {
+          if (!captureScheduled) {
+            captureScheduled = true;
+            let n = 2;
+            setCountdown(n);
+            const iv = window.setInterval(() => {
+              n -= 1;
+              if (n <= 0) {
+                window.clearInterval(iv);
+                setCountdown(null);
+                setFlash(true);
+                setTimeout(() => setFlash(false), 200);
+                const recentOk = captureBufRef.current.filter((s) => s.centered).length;
+                if (recentOk >= 3 && stepRef.current === "liveness") capture();
+                else {
+                  captureScheduled = false;
+                  framingHoldStartRef.current = null;
+                  setStep("framing");
                 }
-              }, 1000);
-            }
-          } else {
-            const sinceShown = ts - challengePromptedAtRef.current;
+              } else {
+                setCountdown(n);
+              }
+            }, 1000);
+          }
+        } else if (canRun && idx !== -1 && m && baseline) {
+          const sinceShown = ts - challengePromptedAtRef.current;
+          if (sinceShown >= PROMPT_READ_DELAY_MS) {
+            // Accumulate active running time (only while engaged).
+            challengeRunningMsRef.current += dt;
+            const remaining = Math.max(0, currentTimeoutRef.current - challengeRunningMsRef.current);
+            setTimeLeft(remaining);
+
             if (sinceShown >= PROMPT_REACTION_MIN_MS) {
               const prev = challengesRef.current[idx];
               const updated = updateChallenge(prev, m, baseline, ts);
@@ -477,7 +495,6 @@ function LiveFaceAI() {
               challengesRef.current[idx] = updated;
               setPoseMeter(updated.poseProgress ?? 0);
 
-              // blink tick animation
               if (
                 updated.kind === "blink" &&
                 updated.blinkJustCountedAt &&
@@ -502,29 +519,54 @@ function LiveFaceAI() {
                   setActiveIdx(nextIdx);
                   challengeStartRef.current = performance.now();
                   challengePromptedAtRef.current = performance.now();
-                  setTimeLeft(CHALLENGE_TIMEOUT_MS);
+                  challengeRunningMsRef.current = 0;
+                  setTimeLeft(currentTimeoutRef.current);
                   setBlinkMeter(0);
                   setSmileMeter(0);
                   setPoseMeter(0);
+                  setHintText("");
                 }, CHALLENGE_BREATHER_MS);
               } else {
                 setChallengeView([...challengesRef.current]);
               }
             }
-          }
-        }
 
-        const activeIndex = challengesRef.current.findIndex((c) => !c.done);
-        if (activeIndex !== -1 && ts >= breatherUntilRef.current) {
-          const elapsed = ts - challengeStartRef.current;
-          const remaining = Math.max(0, CHALLENGE_TIMEOUT_MS - elapsed);
-          setTimeLeft(remaining);
-          if (remaining === 0) {
-            fail(t("timedOut", langRef.current));
-            return;
+            // Soft timeout — DO NOT hard fail.
+            if (remaining === 0) {
+              const a = (attemptsRef.current[idx] ?? 0) + 1;
+              attemptsRef.current[idx] = a;
+              const cur = challengesRef.current[idx];
+              const L = langRef.current;
+
+              // Auto-hint after first timeout on this challenge.
+              setHintText(t(hintKeyFor(cur.kind) as Parameters<typeof t>[0], L));
+
+              // Enable easy mode if same challenge failed ≥ 2 times.
+              if (a >= 2 && !EASY.on) {
+                setEasyMode(true);
+                setEasyModeState(true);
+              }
+
+              if (a >= MAX_ATTEMPTS) {
+                // If at least 2 challenges already passed, accept and proceed.
+                const passed = challengesRef.current.filter((c) => c.done).length;
+                if (passed >= 2) {
+                  challengesRef.current.forEach((c, i) => {
+                    if (i >= idx) challengesRef.current[i] = { ...c, done: true };
+                  });
+                  setChallengeView([...challengesRef.current]);
+                  challengeRunningMsRef.current = 0;
+                  return;
+                }
+                fail(t("failed", L));
+                return;
+              }
+              setSoftTimeoutIdx(idx);
+            }
           }
         }
       }
+
 
       rafRef.current = requestAnimationFrame(tick);
     };
