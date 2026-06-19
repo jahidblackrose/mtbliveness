@@ -1485,15 +1485,34 @@ function DevPanel() {
 
 function ResultScreen({
   photoUrl,
+  videoUrl,
+  videoSupported,
+  imageBlob,
+  videoBlob,
+  submitState,
+  submitError,
   onRetake,
-  onConfirm,
+  onSubmit,
+  onHome,
   tx,
 }: {
   photoUrl: string;
+  videoUrl: string | null;
+  videoSupported: boolean;
+  imageBlob: Blob | null;
+  videoBlob: Blob | null;
+  submitState: "idle" | "uploading" | "ok" | "fail";
+  submitError: string;
   onRetake: () => void;
-  onConfirm: () => void;
+  onSubmit: () => void;
+  onHome: () => void;
   tx: Tx;
 }) {
+  const busy = submitState === "uploading";
+  const done = submitState === "ok";
+  const failed = submitState === "fail";
+  const imgKB = imageBlob ? Math.round(imageBlob.size / 1024) : 0;
+  const vidKB = videoBlob ? Math.round(videoBlob.size / 1024) : 0;
   return (
     <section
       className="space-y-4 animate-in fade-in zoom-in-95 duration-300"
@@ -1502,36 +1521,83 @@ function ResultScreen({
     >
       <div className="flex items-center justify-center gap-2 text-emerald-400">
         <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-        <p className="text-sm font-medium">
-          {tx("livenessVerified")} — {tx("passed")}
-        </p>
+        <p className="text-sm font-medium">{tx("captureSuccess")}</p>
       </div>
-      <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
-        <img
-          src={photoUrl}
-          alt={tx("capturedAlt")}
-          className="aspect-[3/4] w-full object-cover"
-        />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
+          <img
+            src={photoUrl}
+            alt={tx("capturedAlt")}
+            className="aspect-[3/4] w-full object-cover"
+          />
+        </div>
+        <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls
+              playsInline
+              className="aspect-[3/4] w-full object-cover bg-black"
+            />
+          ) : (
+            <div className="flex aspect-[3/4] w-full items-center justify-center px-4 text-center text-xs text-zinc-400">
+              {tx("videoUnsupported")}
+            </div>
+          )}
+        </div>
       </div>
+
+      <p className="text-[11px] text-zinc-500">
+        {tx("videoLabel")} · {imgKB} KB image{videoBlob ? ` · ${vidKB} KB video` : ""}
+        {!videoSupported && ` · ${tx("videoUnsupported")}`}
+      </p>
+
+      {done && (
+        <div className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm text-emerald-300 ring-1 ring-emerald-400/30">
+          {tx("submitOk")}
+        </div>
+      )}
+      {failed && (
+        <div className="rounded-xl bg-red-500/15 px-4 py-3 text-sm text-red-300 ring-1 ring-red-400/30">
+          {tx("submitFail")}
+          {submitError && <p className="mt-1 text-[11px] text-red-200/70">{submitError}</p>}
+        </div>
+      )}
+
       <div className="flex gap-3">
         <Button
           variant="outline"
-          onClick={onRetake}
+          onClick={done ? onHome : onRetake}
+          disabled={busy}
           className="flex-1 border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
         >
           <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-          {tx("retake")}
+          {done ? tx("back2") : tx("retake")}
         </Button>
-        <Button
-          onClick={onConfirm}
-          className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
-        >
-          {tx("confirm")}
-        </Button>
+        {!done && (
+          <Button
+            onClick={onSubmit}
+            disabled={busy}
+            className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
+          >
+            {busy ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-900 border-t-transparent" />
+                {tx("uploading")}
+              </span>
+            ) : failed ? (
+              tx("retrySubmit")
+            ) : (
+              tx("submit")
+            )}
+          </Button>
+        )}
       </div>
     </section>
   );
 }
+
 
 function ErrorScreen({
   msg,
