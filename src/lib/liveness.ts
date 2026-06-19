@@ -533,15 +533,26 @@ export function updateChallenge(
     }
 
     case "nod": {
-      // Combined nod signal: pitch from pose matrix + nose vertical offset
-      // (whichever is moving more). Detect a TRANSITION: cross a threshold
-      // in one direction then return toward neutral. Accept either order
-      // (up-then-down or down-then-up). A single momentary cross is enough
-      // once the auto-assist kicks in.
+      // NOD = VERTICAL ONLY. Use pitch (rotation about X) as primary signal,
+      // fall back to nose vertical offset. Yaw (horizontal) is explicitly
+      // REJECTED so a head turn cannot satisfy a nod prompt.
+      const pitchDelta = m.pitch - baseline.pitch;
+      const noseDyDelta = m.noseDy - baseline.noseDy; // + = nose down
+      const yawDelta = m.yaw - baseline.yaw;
+
+      // Vertical signal: pick whichever vertical channel is moving more.
       const pitchSigned =
-        Math.abs(m.pitch - baseline.pitch) > Math.abs(m.noseDy - baseline.noseDy) * 1.8
-          ? m.pitch - baseline.pitch
-          : m.noseDy - baseline.noseDy; // noseDy: + = down
+        Math.abs(pitchDelta) > Math.abs(noseDyDelta) * 1.8
+          ? pitchDelta
+          : noseDyDelta;
+
+      // Axis-dominance gate: vertical motion must DOMINATE horizontal motion.
+      // If |yaw| swings comparably to or more than vertical, this is a turn,
+      // not a nod — refuse to count it.
+      const vertMag = Math.max(Math.abs(pitchDelta), Math.abs(noseDyDelta));
+      const yawMag = Math.abs(yawDelta);
+      const axisOk = vertMag > yawMag * 1.2; // strict: vertical must clearly lead
+
       const prev = state.nodPitchEma ?? pitchSigned;
       const ema = prev * 0.5 + pitchSigned * 0.5;
       const pitchTh = Math.min(TH.PITCH_NOD_ABS, TH.NOSE_NOD_ABS * 2.2) * mul;
@@ -555,30 +566,34 @@ export function updateChallenge(
         lastAt = now;
       };
 
-      if (phase === "neutral") {
-        if (ema > pitchTh) phase = "down";
-        else if (ema < -pitchTh) phase = "up";
-      } else if (phase === "down") {
-        if (ema < pitchTh * 0.3 && now - lastAt > 120) {
-          justCount();
-          phase = "neutral";
-        }
-      } else if (phase === "up") {
-        if (ema > -pitchTh * 0.3 && now - lastAt > 120) {
-          justCount();
-          phase = "neutral";
+      // Only advance phase transitions when motion is genuinely vertical.
+      if (axisOk) {
+        if (phase === "neutral") {
+          if (ema > pitchTh) phase = "down";
+          else if (ema < -pitchTh) phase = "up";
+        } else if (phase === "down") {
+          if (ema < pitchTh * 0.3 && now - lastAt > 120) {
+            justCount();
+            phase = "neutral";
+          }
+        } else if (phase === "up") {
+          if (ema > -pitchTh * 0.3 && now - lastAt > 120) {
+            justCount();
+            phase = "neutral";
+          }
         }
       }
 
-      // Generous auto-assist: after ASSIST_AFTER_MS, a single momentary cross
-      // (without a return) counts as done.
-      const momentary = Math.abs(ema) > pitchTh;
+      // Auto-assist: a single momentary VERTICAL cross counts as done.
+      const momentary = axisOk && Math.abs(ema) > pitchTh;
       const done = count >= 1 || (mul < 1 && momentary);
 
       const progress = Math.max(
         0,
-        Math.min(1, Math.abs(ema) / pitchTh),
+        Math.min(1, Math.abs(ema) / pitchTh) * (axisOk ? 1 : 0.2),
       );
+      // wrongWay hint when user is turning sideways instead of nodding.
+      const wrongWay = !done && yawMag > vertMag * 1.2 && yawMag > pitchTh * 0.5;
       return {
         ...state,
         poseProgress: progress,
@@ -586,9 +601,11 @@ export function updateChallenge(
         nodPitchEma: ema,
         blinkCount: count,
         blinkLastCountedAt: lastAt,
+        wrongWay,
         done,
       };
     }
+
 
   }
 }
