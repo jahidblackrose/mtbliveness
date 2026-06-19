@@ -31,17 +31,34 @@ function bs(cls: Classifications[] | undefined, name: string): number {
 }
 
 // Extract yaw/pitch/roll (radians) from a 4x4 column-major transformation matrix.
-function poseFromMatrix(m: Matrix | undefined): { yaw: number; pitch: number; roll: number } {
-  if (!m || !m.data || m.data.length < 16) return { yaw: 0, pitch: 0, roll: 0 };
+// MediaPipe's rotation matrix exposes yaw around the vertical axis and pitch
+// around the horizontal axis separately; do not swap these with roll.
+function poseFromMatrix(m: Matrix | undefined): { yaw: number; pitch: number; roll: number } | null {
+  if (!m || !m.data || m.data.length < 16) return null;
   const d = m.data;
   // Column-major: element(row, col) = d[col*4 + row]
   const r00 = d[0], r10 = d[1], r20 = d[2];
   const r21 = d[6];
   const r22 = d[10];
-  const pitch = Math.atan2(-r20, Math.hypot(r21, r22));
-  const yaw = Math.atan2(r10, r00);
-  const roll = Math.atan2(r21, r22);
+  const yaw = Math.atan2(-r20, Math.hypot(r21, r22));
+  const pitch = Math.atan2(r21, r22);
+  const roll = Math.atan2(r10, r00);
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch) || !Number.isFinite(roll)) return null;
   return { yaw, pitch, roll };
+}
+
+function poseFromLandmarks(lm: L[]): { yaw: number; pitch: number; roll: number } {
+  const eyeMidX = (lm[LEFT_EYE_OUTER].x + lm[RIGHT_EYE_OUTER].x) / 2;
+  const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
+  const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
+  const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
+  return {
+    yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceW) * 2,
+    // Nose-to-eye-line has a positive neutral offset, so center it to keep
+    // frameGuidance usable if matrix pose is unavailable.
+    pitch: (((lm[NOSE_TIP].y - eyeMidY) / faceH) - 0.38) * 2.2,
+    roll: 0,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,18 +97,7 @@ export function computeMetrics(
   const smileRight = bs(blendshapes, "mouthSmileRight");
   const jawOpen = bs(blendshapes, "jawOpen");
 
-  let pose = poseFromMatrix(matrix);
-  if (pose.yaw === 0 && pose.pitch === 0 && pose.roll === 0) {
-    const eyeMidX = (lm[LEFT_EYE_OUTER].x + lm[RIGHT_EYE_OUTER].x) / 2;
-    const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
-    const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
-    const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
-    pose = {
-      yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceW) * 2,
-      pitch: ((lm[NOSE_TIP].y - eyeMidY) / faceH) * 2,
-      roll: 0,
-    };
-  }
+  const pose = poseFromMatrix(matrix) ?? poseFromLandmarks(lm);
 
   const cx = (lm[FACE_LEFT].x + lm[FACE_RIGHT].x) / 2;
   const cy = (lm[FACE_TOP].y + lm[FACE_BOTTOM].y) / 2;
