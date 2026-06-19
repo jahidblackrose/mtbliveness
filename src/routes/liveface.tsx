@@ -946,9 +946,27 @@ function LivenessScreen({
                 )}
               </div>
             </div>
-            <p className="mt-0.5 text-lg font-semibold leading-tight text-white">
-              {instruction}
-            </p>
+            <div className="mt-0.5 flex items-center gap-2.5">
+              {phase === "liveness" && active && (
+                <ChallengeDemo kind={active.kind} done={active.done} size={44} />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base font-semibold leading-tight text-white sm:text-lg">
+                  {instruction}
+                </p>
+                {phase === "liveness" && meterLine && active?.kind !== "blink" && (
+                  <p className="text-[11px] text-white/70">{meterLine}</p>
+                )}
+                {phase === "liveness" && (
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/15">
+                    <div
+                      className="h-full bg-emerald-400 transition-[width] duration-100"
+                      style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
             <p
               className={`mt-1 text-xs ${
                 centered ? "text-emerald-200/90" : "text-amber-200/90"
@@ -959,17 +977,7 @@ function LivenessScreen({
             {hintText && !inSoft && (
               <p className="mt-1 text-[11px] text-amber-200/90">{hintText}</p>
             )}
-            {phase === "liveness" && meterLine && active?.kind !== "blink" && (
-              <p className="mt-1 text-[11px] text-white/70">{meterLine}</p>
-            )}
-            {phase === "liveness" && (
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
-                <div
-                  className="h-full bg-emerald-400 transition-[width] duration-100"
-                  style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
-                />
-              </div>
-            )}
+
             {isDev && (
               <p className="mt-1 text-[10px] text-white/50">FPS: {fps}</p>
             )}
