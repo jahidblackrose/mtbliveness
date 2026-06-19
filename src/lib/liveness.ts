@@ -691,3 +691,66 @@ export class SpoofGuard {
     return null;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Face signature (post-pass integrity gate)
+// Geometric landmark-ratio fingerprint, designed to be person-distinctive but
+// view-stable for near-frontal poses. Used to ensure the same person stays in
+// frame between passing all challenges and the actual capture.
+// ─────────────────────────────────────────────────────────────────────────────
+export type FaceSignature = {
+  eyeWidthOverFaceWidth: number;
+  noseToEyeY: number;
+  chinToEyeY: number;
+  cheekOverFaceWidth: number;
+};
+
+export function computeSignature(lm: L[]): FaceSignature {
+  const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
+  const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
+  const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
+  return {
+    eyeWidthOverFaceWidth: (lm[RIGHT_EYE_OUTER].x - lm[LEFT_EYE_OUTER].x) / faceW,
+    noseToEyeY: (lm[NOSE_TIP].y - eyeMidY) / faceH,
+    chinToEyeY: (lm[CHIN].y - eyeMidY) / faceH,
+    cheekOverFaceWidth: (lm[RIGHT_CHEEK].x - lm[LEFT_CHEEK].x) / faceW,
+  };
+}
+
+export function avgSignatures(arr: FaceSignature[]): FaceSignature | null {
+  if (arr.length === 0) return null;
+  const acc = { eyeWidthOverFaceWidth: 0, noseToEyeY: 0, chinToEyeY: 0, cheekOverFaceWidth: 0 };
+  for (const s of arr) {
+    acc.eyeWidthOverFaceWidth += s.eyeWidthOverFaceWidth;
+    acc.noseToEyeY += s.noseToEyeY;
+    acc.chinToEyeY += s.chinToEyeY;
+    acc.cheekOverFaceWidth += s.cheekOverFaceWidth;
+  }
+  const n = arr.length;
+  return {
+    eyeWidthOverFaceWidth: acc.eyeWidthOverFaceWidth / n,
+    noseToEyeY: acc.noseToEyeY / n,
+    chinToEyeY: acc.chinToEyeY / n,
+    cheekOverFaceWidth: acc.cheekOverFaceWidth / n,
+  };
+}
+
+/** 1.0 = identical signatures; ~0.7+ = same person; <0.6 = likely different. */
+export function signatureSimilarity(a: FaceSignature, b: FaceSignature): number {
+  const rel = (x: number, y: number) =>
+    Math.abs(x - y) / Math.max(0.001, (Math.abs(x) + Math.abs(y)) / 2);
+  const diffs = [
+    rel(a.eyeWidthOverFaceWidth, b.eyeWidthOverFaceWidth),
+    rel(a.noseToEyeY, b.noseToEyeY),
+    rel(a.chinToEyeY, b.chinToEyeY),
+    rel(a.cheekOverFaceWidth, b.cheekOverFaceWidth),
+  ];
+  const meanDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  return Math.max(0, Math.min(1, 1 - meanDiff * 2.5));
+}
+
+export const INTEGRITY = {
+  SIM_PASS: 0.62,       // below this for sustained time = different person
+  SIM_CAPTURE: 0.58,    // hard gate at the moment of capture
+  FAIL_SUSTAIN_MS: 700, // mismatch must persist before restart fires
+};
