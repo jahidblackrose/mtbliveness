@@ -314,6 +314,10 @@ function LiveFaceAI() {
     challengeRunningMsRef.current = 0;
     setTimeLeft(CHALLENGE_TIMEOUT_MS);
     setHintText("");
+    setCaptureSeq("idle");
+    captureSeqRef.current = "idle";
+    setBigCountdown(null);
+    lookStraightHoldRef.current = null;
     setStep("liveness");
   }, []);
 
