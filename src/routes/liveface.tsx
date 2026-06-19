@@ -834,6 +834,8 @@ function LivenessScreen({
   guidance,
   centered,
   countdown,
+  captureSeq,
+  liveReadout,
   timeLeft,
   timeoutMs,
   flash,
@@ -865,6 +867,8 @@ function LivenessScreen({
   guidance: string;
   centered: boolean;
   countdown: number | null;
+  captureSeq: "idle" | "success" | "lookStraight" | "countdown" | "capturing";
+  liveReadout: { blink: number; smile: number; yaw: number; pitch: number };
   timeLeft: number;
   timeoutMs: number;
   flash: boolean;
@@ -894,32 +898,41 @@ function LivenessScreen({
   const secondsLeft = Math.ceil(timeLeft / 1000);
   const amber = phase === "liveness" && timeLeft > 0 && timeLeft <= 5000;
   const inSoft = softTimeoutIdx != null;
+  const inCapture = phase === "liveness" && captureSeq !== "idle";
 
   let headerLabel = "";
   if (phase === "framing") headerLabel = tx("framing");
   else if (phase === "calibrating") headerLabel = tx("calibrating");
+  else if (inCapture) headerLabel = tx("allDone");
   else headerLabel = tx("stepOf", { n: stepNum, t: totalSteps });
 
   let instruction = "";
   if (phase === "framing") instruction = tx("getInFrame");
   else if (phase === "calibrating") instruction = tx("holdStillEllipsis");
+  else if (captureSeq === "success") instruction = tx("allDone");
+  else if (captureSeq === "lookStraight") instruction = tx("lookStraight");
+  else if (captureSeq === "countdown") instruction = tx("hold");
+  else if (captureSeq === "capturing") instruction = tx("capturing");
   else if (active) instruction = tx(CHALLENGE_KEY[active.kind]);
   else instruction = tx("allSet");
 
   let meterLine: string | null = null;
   let meterValue = 0;
-  if (phase === "liveness" && active) {
+  if (phase === "liveness" && !inCapture && active) {
     if (active.kind === "blink") {
-      meterLine = tx("blinkCount", { n: active.blinkCount ?? 0 });
+      meterLine = tx("blinkProgress", { n: active.blinkCount ?? 0 });
       meterValue = blinkMeter;
     } else if (active.kind === "smile") {
-      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("keepSmiling") : tx("showSmile");
+      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("smileHold") : tx("showSmile");
       meterValue = Math.max(smileMeter, active.smileIntensity ?? 0);
     } else {
       meterLine = tx("slowSteady");
       meterValue = Math.max(poseMeter, active.poseProgress ?? 0);
     }
   }
+
+  // Demo icon — only during running challenges; success/capture show a check.
+  const showDemo = phase === "liveness" && !inCapture && !!active;
 
   return (
     <section className="space-y-4">
@@ -933,7 +946,7 @@ function LivenessScreen({
           )}
         </span>
         <div className="flex items-center gap-1">
-          {phase === "liveness" && (
+          {phase === "liveness" && !inCapture && (
             <button
               onClick={onTogglePause}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
@@ -962,26 +975,14 @@ function LivenessScreen({
         </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          autoPlay
-          className="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
-        />
-        <canvas
-          ref={overlayRef}
-          width={400}
-          height={533}
-          className="absolute inset-0 h-full w-full"
-        />
-        <canvas ref={sampleRef} className="hidden" />
-
-        {/* TOP OVERLAY BAND */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
-          <div className="rounded-2xl bg-black/65 px-4 py-3 backdrop-blur-md ring-1 ring-white/10">
-            {(phase === "liveness" || phase === "calibrating") && (
+      {/* TWO-ZONE LAYOUT: message band on top (mobile) / left (desktop),
+          camera card below (mobile) / right (desktop). The instruction
+          never overlaps the face. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start lg:gap-6">
+        {/* MESSAGE BAND */}
+        <div className="order-1 lg:order-1">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 shadow-md">
+            {(phase === "liveness" || phase === "calibrating") && !inCapture && (
               <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/15">
                 <div
                   className={`h-full transition-[width] duration-100 ${
@@ -1002,7 +1003,7 @@ function LivenessScreen({
                 {headerLabel}
               </span>
               <div className="flex items-center gap-2">
-                {phase === "liveness" && !inSoft && (
+                {phase === "liveness" && !inSoft && !inCapture && (
                   <span
                     className={`text-[11px] font-semibold tabular-nums ${
                       amber ? "text-amber-300" : "text-white/70"
@@ -1011,29 +1012,54 @@ function LivenessScreen({
                     {paused ? tx("paused") : `${secondsLeft}s`}
                   </span>
                 )}
-                {phase === "liveness" && active?.kind === "blink" && (
+                {phase === "liveness" && !inCapture && active?.kind === "blink" && (
                   <span
                     key={blinkTick}
                     className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
                   >
-                    {tx("blinkCount", { n: active.blinkCount ?? 0 })}
+                    {tx("blinkProgress", { n: active.blinkCount ?? 0 })}
                   </span>
                 )}
               </div>
             </div>
-            <div className="mt-0.5 flex items-center gap-2.5">
-              {phase === "liveness" && active && (
-                <ChallengeDemo kind={active.kind} done={active.done} size={44} />
+
+            <div className="mt-1 flex items-center gap-3">
+              {/* DEMO LEFT OF MESSAGE */}
+              {showDemo && active && (
+                <ChallengeDemo kind={active.kind} done={active.done} size={56} />
               )}
+              {!showDemo && (captureSeq === "success" || captureSeq === "capturing") && (
+                <div
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/40"
+                  style={{ width: 56, height: 56 }}
+                  aria-hidden="true"
+                >
+                  <CheckCircle2 className="h-7 w-7" />
+                </div>
+              )}
+              {!showDemo && (captureSeq === "lookStraight" || captureSeq === "countdown") && (
+                <div
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-white/10 text-white ring-1 ring-white/20"
+                  style={{ width: 56, height: 56 }}
+                  aria-hidden="true"
+                >
+                  {captureSeq === "countdown" && countdown !== null ? (
+                    <span className="text-2xl font-bold tabular-nums">{countdown}</span>
+                  ) : (
+                    <Camera className="h-7 w-7" />
+                  )}
+                </div>
+              )}
+
               <div className="min-w-0 flex-1">
-                <p className="truncate text-base font-semibold leading-tight text-white sm:text-lg">
+                <p className="text-base font-semibold leading-tight text-white sm:text-lg">
                   {instruction}
                 </p>
-                {phase === "liveness" && meterLine && active?.kind !== "blink" && (
-                  <p className="text-[11px] text-white/70">{meterLine}</p>
+                {meterLine && (
+                  <p className="mt-0.5 text-[11px] text-white/70">{meterLine}</p>
                 )}
-                {phase === "liveness" && (
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/15">
+                {phase === "liveness" && !inCapture && (
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/15">
                     <div
                       className="h-full bg-emerald-400 transition-[width] duration-100"
                       style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
@@ -1041,9 +1067,20 @@ function LivenessScreen({
                   </div>
                 )}
               </div>
+
+              {/* Big countdown number on the right of the message */}
+              {captureSeq === "countdown" && countdown !== null && (
+                <div
+                  key={`big-${countdown}`}
+                  className="shrink-0 text-5xl font-black tabular-nums text-emerald-300 animate-in zoom-in-95 duration-200"
+                >
+                  {countdown}
+                </div>
+              )}
             </div>
+
             <p
-              className={`mt-1 text-xs ${
+              className={`mt-2 text-xs ${
                 centered ? "text-emerald-200/90" : "text-amber-200/90"
               }`}
             >
@@ -1053,86 +1090,117 @@ function LivenessScreen({
               <p className="mt-1 text-[11px] text-amber-200/90">{hintText}</p>
             )}
 
+            {/* Step dots inside band (clearer on desktop) */}
+            {phase === "liveness" && challenges.length > 0 && (
+              <div className="mt-3 flex items-center gap-1.5">
+                {challenges.map((c, i) => (
+                  <span
+                    key={i}
+                    className={`h-1.5 rounded-full transition-all ${
+                      c.done
+                        ? "w-6 bg-emerald-400"
+                        : i === activeIdx && !inCapture
+                          ? "w-6 bg-white/80"
+                          : "w-1.5 bg-white/30"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+
             {isDev && (
-              <p className="mt-1 text-[10px] text-white/50">FPS: {fps}</p>
+              <p className="mt-2 text-[10px] text-white/40">
+                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw.toFixed(2)} · pitch {liveReadout.pitch.toFixed(2)}
+              </p>
+            )}
+          </div>
+
+          {isDev && devOpen && (
+            <div className="mt-3">
+              <DevPanel />
+            </div>
+          )}
+        </div>
+
+        {/* CAMERA CARD (right on desktop, below on mobile) */}
+        <div className="order-2 lg:order-2 lg:justify-self-end w-full">
+          <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
+            />
+            <canvas
+              ref={overlayRef}
+              width={400}
+              height={533}
+              className="absolute inset-0 h-full w-full"
+            />
+            <canvas ref={sampleRef} className="hidden" />
+
+            {/* Blink flash tick */}
+            {phase === "liveness" && !inCapture && active?.kind === "blink" && (
+              <div
+                key={`tick-${blinkTick}`}
+                className="pointer-events-none absolute inset-0 bg-emerald-400/20 opacity-0 animate-in fade-in zoom-in-95"
+                style={{
+                  animationDuration: "180ms",
+                  animationDirection: "alternate",
+                  animationIterationCount: 2,
+                }}
+              />
+            )}
+
+            <div
+              className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
+                flash ? "opacity-70" : "opacity-0"
+              }`}
+            />
+
+            {/* Big countdown ALSO over the camera so users looking at the lens see it */}
+            {captureSeq === "countdown" && countdown !== null && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div
+                  key={`cam-cd-${countdown}`}
+                  className="rounded-full bg-black/60 px-8 py-5 text-6xl font-black text-white backdrop-blur-sm animate-in zoom-in-90 duration-200"
+                >
+                  {countdown}
+                </div>
+              </div>
+            )}
+
+            {/* Paused overlay */}
+            {paused && !inSoft && phase === "liveness" && !inCapture && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-3 rounded-2xl bg-zinc-900/80 px-6 py-5 ring-1 ring-white/10">
+                  <Pause className="h-6 w-6 text-white" />
+                  <p className="text-sm text-white/80">{tx("paused")}</p>
+                  <Button onClick={onTogglePause} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
+                    <Play className="mr-2 h-4 w-4" />
+                    {tx("resumeBtn")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Soft-timeout overlay (per-challenge retry) */}
+            {inSoft && phase === "liveness" && !inCapture && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+                <div className="w-full max-w-xs space-y-3 rounded-2xl bg-zinc-900/90 px-5 py-5 text-center ring-1 ring-white/10">
+                  <p className="text-sm font-semibold text-white">{tx("timeoutSoft")}</p>
+                  <p className="text-[11px] text-white/60">{tx("attempt", { n: attempts })}</p>
+                  {hintText && <p className="text-xs text-amber-200/90">{hintText}</p>}
+                  <Button onClick={onTryAgain} className="w-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
+                    {tx("tryAgain")}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>
-
-        {/* Blink flash tick */}
-        {phase === "liveness" && active?.kind === "blink" && (
-          <div
-            key={`tick-${blinkTick}`}
-            className="pointer-events-none absolute inset-0 bg-emerald-400/20 opacity-0 animate-in fade-in zoom-in-95"
-            style={{
-              animationDuration: "180ms",
-              animationDirection: "alternate",
-              animationIterationCount: 2,
-            }}
-          />
-        )}
-
-        <div
-          className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
-            flash ? "opacity-70" : "opacity-0"
-          }`}
-        />
-        {countdown !== null && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="rounded-full bg-black/60 px-6 py-4 text-5xl font-bold text-white backdrop-blur-sm">
-              {countdown}
-            </div>
-          </div>
-        )}
-
-        {/* Paused overlay */}
-        {paused && !inSoft && phase === "liveness" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-3 rounded-2xl bg-zinc-900/80 px-6 py-5 ring-1 ring-white/10">
-              <Pause className="h-6 w-6 text-white" />
-              <p className="text-sm text-white/80">{tx("paused")}</p>
-              <Button onClick={onTogglePause} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
-                <Play className="mr-2 h-4 w-4" />
-                {tx("resumeBtn")}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Soft-timeout overlay (per-challenge retry) */}
-        {inSoft && phase === "liveness" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <div className="w-full max-w-xs space-y-3 rounded-2xl bg-zinc-900/90 px-5 py-5 text-center ring-1 ring-white/10">
-              <p className="text-sm font-semibold text-white">{tx("timeoutSoft")}</p>
-              <p className="text-[11px] text-white/60">{tx("attempt", { n: attempts })}</p>
-              {hintText && <p className="text-xs text-amber-200/90">{hintText}</p>}
-              <Button onClick={onTryAgain} className="w-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
-                {tx("tryAgain")}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom: progress dots */}
-        {phase === "liveness" && (
-          <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 p-3">
-            {challenges.map((c, i) => (
-              <span
-                key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  c.done
-                    ? "w-5 bg-emerald-400"
-                    : i === activeIdx
-                      ? "w-5 bg-white/80"
-                      : "w-1.5 bg-white/30"
-                }`}
-              />
-            ))}
-          </div>
-        )}
       </div>
-
-      {isDev && devOpen && <DevPanel />}
     </section>
   );
 }
