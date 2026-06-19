@@ -440,7 +440,12 @@ function calibrateYawSignFromNose(
   if (horizontalEnough && noseSupportsPrompt && yawOpposesPrompt) {
     DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
     DIRECTION.calibratedYaw = true;
-  } else if (horizontalEnough && yawSupportsPrompt && square(pitchChange) < square(pitchTh)) {
+  } else if (
+    horizontalEnough &&
+    noseSupportsPrompt &&
+    yawSupportsPrompt &&
+    square(pitchChange) < square(pitchTh)
+  ) {
     DIRECTION.calibratedYaw = true;
   }
 }
@@ -620,17 +625,21 @@ export function updateChallenge(
         if (dyaw2 > square(yawTh * 0.6)) parallaxOk = dz2 > square(TH.PARALLAX_MIN);
       }
 
+      const done = debug.pass && DIRECTION.calibratedYaw;
+      const wrongHint =
+        debug.wrongHint ?? (!DIRECTION.calibratedYaw && debug.resolved !== "none" ? "wrongDir" : undefined);
+
       return {
         ...state,
         poseProgress: progress,
         parallaxStartNoseRelZ: pStartZ,
         parallaxStartYaw: pStartYaw,
         parallaxOk,
-        wrongWay: !!debug.wrongHint,
-        wrongHint: debug.wrongHint,
+        wrongWay: !!wrongHint,
+        wrongHint,
         startedNearNeutral: neutralReady,
-        headDebug: debug,
-        done: debug.pass,
+        headDebug: { ...debug, pass: done, wrongHint },
+        done,
       };
     }
 
