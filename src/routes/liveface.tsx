@@ -424,6 +424,13 @@ function LiveFaceAI() {
         window.clearInterval(captureIntervalRef.current);
         captureIntervalRef.current = null;
       }
+      refSigSamplesRef.current = [];
+      referenceSigRef.current = null;
+      lastSignatureRef.current = null;
+      setRefSigCaptured(false);
+      setLiveSim(1);
+      integrityFailStartRef.current = null;
+      setIntegrityDecision("ok");
       challengeRunningMsRef.current = 0;
       sessionStartRef.current = performance.now();
       setStep("framing");
