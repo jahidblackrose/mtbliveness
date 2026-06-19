@@ -266,16 +266,22 @@ function LiveFaceAI() {
           resolve(null);
           return;
         }
-        resolve(new Blob(parts, { type: mime }));
+        // Use the recorder's actual mimeType if available; falls back to ours.
+        const type = (rec.mimeType && rec.mimeType.length > 0) ? rec.mimeType : mime;
+        const blob = new Blob(parts, { type });
+        resolve(blob.size > 0 ? blob : null);
       };
       if (rec.state === "inactive") {
         finalize();
         return;
       }
       rec.onstop = () => finalize();
+      // Flush any in-flight buffer so the final chunk is captured BEFORE stop.
+      try { rec.requestData(); } catch { /* ignore */ }
       try { rec.stop(); } catch { finalize(); }
     });
   }, []);
+
 
   const fail = useCallback(
     (msg: string) => {
