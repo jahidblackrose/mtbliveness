@@ -892,14 +892,10 @@ function LiveFaceAI() {
 
 
 
-  const langClass = useMemo(
-    () => (lang === "bn" ? "font-bangla" : "font-sans"),
-    [lang],
-  );
-
   return (
     <main
-      className={`min-h-dvh bg-zinc-950 text-zinc-100 ${langClass}`}
+      className="min-h-dvh bg-zinc-950 text-zinc-100"
+
       style={{
         fontFamily:
           lang === "bn"
