@@ -462,22 +462,63 @@ export function updateChallenge(
     }
 
     case "nod": {
-      // Nod = up OR down. Use pose-matrix pitch OR nose vertical offset
-      // relative to baseline. Whichever fires first wins.
-      const pitchRel = Math.abs(m.pitch - baseline.pitch);
-      const noseRel = Math.abs(m.noseDy - baseline.noseDy);
-      const pitchTh = TH.PITCH_NOD_ABS * mul;
-      const noseTh = TH.NOSE_NOD_ABS * mul;
+      // Combined nod signal: pitch from pose matrix + nose vertical offset
+      // (whichever is moving more). Detect a TRANSITION: cross a threshold
+      // in one direction then return toward neutral. Accept either order
+      // (up-then-down or down-then-up). A single momentary cross is enough
+      // once the auto-assist kicks in.
+      const pitchSigned =
+        Math.abs(m.pitch - baseline.pitch) > Math.abs(m.noseDy - baseline.noseDy) * 1.8
+          ? m.pitch - baseline.pitch
+          : m.noseDy - baseline.noseDy; // noseDy: + = down
+      const prev = state.nodPitchEma ?? pitchSigned;
+      const ema = prev * 0.5 + pitchSigned * 0.5;
+      const pitchTh = Math.min(TH.PITCH_NOD_ABS, TH.NOSE_NOD_ABS * 2.2) * mul;
+
+      let phase = state.nodPhase ?? "neutral";
+      let count = state.blinkCount ?? 0; // reuse counter slot
+      let lastAt = state.blinkLastCountedAt ?? 0;
+
+      const justCount = () => {
+        count += 1;
+        lastAt = now;
+      };
+
+      if (phase === "neutral") {
+        if (ema > pitchTh) phase = "down";
+        else if (ema < -pitchTh) phase = "up";
+      } else if (phase === "down") {
+        if (ema < pitchTh * 0.3 && now - lastAt > 120) {
+          justCount();
+          phase = "neutral";
+        }
+      } else if (phase === "up") {
+        if (ema > -pitchTh * 0.3 && now - lastAt > 120) {
+          justCount();
+          phase = "neutral";
+        }
+      }
+
+      // Generous auto-assist: after ASSIST_AFTER_MS, a single momentary cross
+      // (without a return) counts as done.
+      const momentary = Math.abs(ema) > pitchTh;
+      const done = count >= 1 || (mul < 1 && momentary);
+
       const progress = Math.max(
         0,
-        Math.min(1, Math.max(pitchRel / pitchTh, noseRel / noseTh)),
+        Math.min(1, Math.abs(ema) / pitchTh),
       );
       return {
         ...state,
         poseProgress: progress,
-        done: pitchRel > pitchTh || noseRel > noseTh,
+        nodPhase: phase,
+        nodPitchEma: ema,
+        blinkCount: count,
+        blinkLastCountedAt: lastAt,
+        done,
       };
     }
+
   }
 }
 
