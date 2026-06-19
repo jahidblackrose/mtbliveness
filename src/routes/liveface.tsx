@@ -179,6 +179,15 @@ function LiveFaceAI() {
   const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
   const readoutAccumRef = useRef(0);
 
+  // ── Post-pass integrity gate: reference signature + live similarity ──
+  const refSigSamplesRef = useRef<FaceSignature[]>([]);
+  const referenceSigRef = useRef<FaceSignature | null>(null);
+  const lastSignatureRef = useRef<FaceSignature | null>(null);
+  const [refSigCaptured, setRefSigCaptured] = useState(false);
+  const [liveSim, setLiveSim] = useState(1);
+  const integrityFailStartRef = useRef<number | null>(null);
+  const [integrityDecision, setIntegrityDecision] = useState<string>("ok");
+
   const currentTimeoutMs = easyMode ? CONFIG.EASY_CHALLENGE_TIMEOUT_MS : CONFIG.CHALLENGE_TIMEOUT_MS;
   const currentTimeoutRef = useRef<number>(CONFIG.CHALLENGE_TIMEOUT_MS);
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
