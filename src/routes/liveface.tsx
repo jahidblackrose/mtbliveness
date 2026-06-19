@@ -359,7 +359,8 @@ function LiveFaceAI() {
       "image/jpeg",
       0.92,
     );
-  }, [assembleVideo, fail, integrityRestart]);
+  }, [assembleVideo, fail]);
+  const integrityRestartRef = useRef<((kind: "changed" | "mismatch") => void) | null>(null);
 
 
   const setSmoothGuidance = (text: string, now: number) => {
