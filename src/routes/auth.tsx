@@ -62,10 +62,18 @@ function AuthPage() {
             Sign in with Google to verify your identity in 3 quick steps.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <Button onClick={signIn} disabled={loading} className="w-full" size="lg">
             <GoogleIcon className="mr-2 h-5 w-5" />
             {loading ? "Redirecting..." : "Continue with Google"}
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full"
+            size="lg"
+            onClick={() => navigate({ to: "/", replace: true })}
+          >
+            Skip for now
           </Button>
         </CardContent>
       </Card>
