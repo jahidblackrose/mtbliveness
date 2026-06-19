@@ -48,25 +48,24 @@ function poseFromMatrix(m: Matrix | undefined): { yaw: number; pitch: number; ro
 // Per-frame face metrics
 // ─────────────────────────────────────────────────────────────────────────────
 export type FaceMetrics = {
-  // blendshapes
   blinkLeft: number;
   blinkRight: number;
   blinkAvg: number;
+  blinkMax: number;
   smileLeft: number;
   smileRight: number;
   smileAvg: number;
+  smileMax: number;
   jawOpen: number;
-  // pose (radians from matrix; falls back to landmark estimate)
   yaw: number;
   pitch: number;
   roll: number;
-  // framing
   centerOffset: number;
   faceSize: number;
-  // depth (pseudo) — variance of normalized z across key landmarks
+  noseDx: number; // nose offset from face center, normalized by face width
+  noseDy: number; // nose offset from face center, normalized by face height
   depthSpread: number;
-  noseRelZ: number; // nose z minus mean of cheek/ear z (more negative = closer)
-  // raw landmark fingerprint for freeze detection
+  noseRelZ: number;
   fingerprint: number;
 };
 
@@ -82,15 +81,14 @@ export function computeMetrics(
   const jawOpen = bs(blendshapes, "jawOpen");
 
   let pose = poseFromMatrix(matrix);
-  // Fallback yaw via nose vs eye midpoint if matrix is empty.
   if (pose.yaw === 0 && pose.pitch === 0 && pose.roll === 0) {
     const eyeMidX = (lm[LEFT_EYE_OUTER].x + lm[RIGHT_EYE_OUTER].x) / 2;
-    const faceWidth = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
+    const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
     const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
-    const faceHeight = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
+    const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
     pose = {
-      yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceWidth) * 2,
-      pitch: ((lm[NOSE_TIP].y - eyeMidY) / faceHeight) * 2,
+      yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceW) * 2,
+      pitch: ((lm[NOSE_TIP].y - eyeMidY) / faceH) * 2,
       roll: 0,
     };
   }
@@ -98,18 +96,14 @@ export function computeMetrics(
   const cx = (lm[FACE_LEFT].x + lm[FACE_RIGHT].x) / 2;
   const cy = (lm[FACE_TOP].y + lm[FACE_BOTTOM].y) / 2;
   const centerOffset = Math.hypot(cx - 0.5, cy - 0.5);
+  const faceWidth = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
   const faceSize = lm[FACE_BOTTOM].y - lm[FACE_TOP].y;
+  const noseDx = (lm[NOSE_TIP].x - cx) / faceWidth;
+  const noseDy = (lm[NOSE_TIP].y - cy) / Math.max(0.0001, faceSize);
 
-  // Depth structure across key points (z is in camera space; smaller = closer).
   const zs = [
-    lm[NOSE_TIP].z,
-    lm[LEFT_EYE_OUTER].z,
-    lm[RIGHT_EYE_OUTER].z,
-    lm[LEFT_CHEEK].z,
-    lm[RIGHT_CHEEK].z,
-    lm[FACE_LEFT].z,
-    lm[FACE_RIGHT].z,
-    lm[CHIN].z,
+    lm[NOSE_TIP].z, lm[LEFT_EYE_OUTER].z, lm[RIGHT_EYE_OUTER].z,
+    lm[LEFT_CHEEK].z, lm[RIGHT_CHEEK].z, lm[FACE_LEFT].z, lm[FACE_RIGHT].z, lm[CHIN].z,
   ];
   const meanZ = zs.reduce((a, b) => a + b, 0) / zs.length;
   const variance = zs.reduce((a, z) => a + (z - meanZ) ** 2, 0) / zs.length;
@@ -118,30 +112,21 @@ export function computeMetrics(
     (lm[LEFT_CHEEK].z + lm[RIGHT_CHEEK].z + lm[FACE_LEFT].z + lm[FACE_RIGHT].z) / 4;
   const noseRelZ = lm[NOSE_TIP].z - meanCheekEar;
 
-  // Cheap fingerprint of geometry to detect frozen/replayed frames.
   const fp =
-    lm[NOSE_TIP].x * 1000 +
-    lm[NOSE_TIP].y * 1000 +
-    lm[LEFT_EYE_OUTER].x * 100 +
-    lm[RIGHT_EYE_OUTER].x * 100 +
-    lm[CHIN].y * 10;
+    lm[NOSE_TIP].x * 1000 + lm[NOSE_TIP].y * 1000 +
+    lm[LEFT_EYE_OUTER].x * 100 + lm[RIGHT_EYE_OUTER].x * 100 + lm[CHIN].y * 10;
 
   return {
-    blinkLeft,
-    blinkRight,
+    blinkLeft, blinkRight,
     blinkAvg: (blinkLeft + blinkRight) / 2,
-    smileLeft,
-    smileRight,
+    blinkMax: Math.max(blinkLeft, blinkRight),
+    smileLeft, smileRight,
     smileAvg: (smileLeft + smileRight) / 2,
+    smileMax: Math.max(smileLeft, smileRight),
     jawOpen,
-    yaw: pose.yaw,
-    pitch: pose.pitch,
-    roll: pose.roll,
-    centerOffset,
-    faceSize,
-    depthSpread,
-    noseRelZ,
-    fingerprint: fp,
+    yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll,
+    centerOffset, faceSize, noseDx, noseDy,
+    depthSpread, noseRelZ, fingerprint: fp,
   };
 }
 
