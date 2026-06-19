@@ -239,6 +239,8 @@ export type ChallengeState = {
   blinkCount?: number;
   blinkPhase?: "open" | "closed";
   blinkEma?: number;
+  blinkLastCountedAt?: number; // refractory cooldown anchor
+  blinkJustCountedAt?: number; // for UI flash animation
   // smile
   smileEma?: number;
   smileHoldStart?: number; // ms when smile rose above threshold
@@ -253,7 +255,8 @@ export type ChallengeState = {
 
 export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
   const base: ChallengeState = { kind, done: false, startedAt: now };
-  if (kind === "blink") return { ...base, blinkCount: 0, blinkPhase: "open", blinkEma: 0 };
+  if (kind === "blink")
+    return { ...base, blinkCount: 0, blinkPhase: "open", blinkEma: 0, blinkLastCountedAt: 0 };
   if (kind === "smile") return { ...base, smileEma: 0, smileIntensity: 0 };
   return base;
 }
