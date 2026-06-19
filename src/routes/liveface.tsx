@@ -637,9 +637,17 @@ function LiveFaceAI() {
 
       const currentStep = stepRef.current;
 
-      if ((currentStep === "calibrating" || currentStep === "liveness") && faces > 1) {
-        fail(t("secondFace", langRef.current));
-        return;
+      // Part A: multi-face mid-flow does NOT hard fail. frameGuidance()
+      // already returns ok=false + key="onePerson", which pauses challenge
+      // detection/timer and shows the bilingual hint. The user can recover
+      // by getting alone again — no reset, no error screen.
+
+      // Update the live face signature each frame (used by Part B integrity).
+      if (m && result.faceLandmarks?.[0]) {
+        const sig = computeSignature(result.faceLandmarks[0]);
+        lastSignatureRef.current = sig;
+      } else {
+        lastSignatureRef.current = null;
       }
 
       if (currentStep === "framing") {
