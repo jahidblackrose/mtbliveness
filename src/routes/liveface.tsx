@@ -195,12 +195,22 @@ function LiveFaceAI() {
     stepRef.current = step;
   }, [step]);
 
+  const stopRecorder = useCallback(() => {
+    const r = recorderRef.current;
+    if (r && r.state !== "inactive") {
+      try { r.stop(); } catch { /* ignore */ }
+    }
+    recorderRef.current = null;
+  }, []);
+
   const stopAll = useCallback(() => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    stopRecorder();
+    chunksRef.current = [];
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
-  }, []);
+  }, [stopRecorder]);
 
   useEffect(() => () => stopAll(), [stopAll]);
   useEffect(
@@ -209,6 +219,68 @@ function LiveFaceAI() {
     },
     [photoUrl],
   );
+  useEffect(
+    () => () => {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+    },
+    [videoUrl],
+  );
+
+  const startRecorder = useCallback((stream: MediaStream) => {
+    chunksRef.current = [];
+    const mime = pickVideoMime();
+    recorderMimeRef.current = mime;
+    if (!mime) {
+      setVideoSupported(false);
+      recorderRef.current = null;
+      return;
+    }
+    try {
+      const rec = new MediaRecorder(stream, { mimeType: mime });
+      rec.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          const ts = performance.now();
+          chunksRef.current.push({ ts, blob: e.data });
+          // Trim to last VIDEO_WINDOW_MS + 1s of cushion.
+          const cutoff = ts - (VIDEO_WINDOW_MS + 1000);
+          while (chunksRef.current.length > 1 && chunksRef.current[0].ts < cutoff) {
+            chunksRef.current.shift();
+          }
+        }
+      };
+      rec.start(1000);
+      recorderRef.current = rec;
+      setVideoSupported(true);
+    } catch {
+      recorderRef.current = null;
+      setVideoSupported(false);
+    }
+  }, []);
+
+  const assembleVideo = useCallback((): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const rec = recorderRef.current;
+      const mime = recorderMimeRef.current;
+      if (!rec || !mime) {
+        resolve(null);
+        return;
+      }
+      const finalize = () => {
+        const parts = chunksRef.current.map((c) => c.blob);
+        if (parts.length === 0) {
+          resolve(null);
+          return;
+        }
+        resolve(new Blob(parts, { type: mime }));
+      };
+      if (rec.state === "inactive") {
+        finalize();
+        return;
+      }
+      rec.onstop = () => finalize();
+      try { rec.stop(); } catch { finalize(); }
+    });
+  }, []);
 
   const fail = useCallback(
     (msg: string) => {
@@ -231,19 +303,29 @@ function LiveFaceAI() {
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(
-      (blob) => {
+      async (blob) => {
         if (!blob) {
           fail(t("captureFail", langRef.current));
           return;
         }
+        setImageBlob(blob);
         setPhotoUrl(URL.createObjectURL(blob));
-        stopAll();
+        // Stop & assemble the rolling video — keep camera stream alive
+        // so retake can re-run the post-pass countdown without redoing challenges.
+        const vb = await assembleVideo();
+        if (vb) {
+          setVideoBlob(vb);
+          setVideoUrl(URL.createObjectURL(vb));
+        } else {
+          setVideoBlob(null);
+        }
         setStep("result");
       },
       "image/jpeg",
       0.92,
     );
-  }, [fail, stopAll]);
+  }, [assembleVideo, fail]);
+
 
   const setSmoothGuidance = (text: string, now: number) => {
     if (text === guidanceDraftRef.current) return;
