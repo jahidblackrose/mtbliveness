@@ -99,6 +99,32 @@ export const STRINGS = {
     en: "Could not capture frame.",
   },
 
+  // Soft timeout / retry / pause / easy mode
+  timeoutSoft: { bn: "সময় শেষ। আবার চেষ্টা করুন।", en: "Time's up. Let's try again." },
+  paused: { bn: "বিরতি চলছে", en: "Paused" },
+  pauseBtn: { bn: "⏸ বিরতি", en: "⏸ Pause" },
+  resumeBtn: { bn: "▶ চালু করুন", en: "▶ Resume" },
+  tryAgain: { bn: "আবার চেষ্টা করুন", en: "Try again" },
+  attempt: { bn: "চেষ্টা {n}/3", en: "Attempt {n}/3" },
+  easyModeOn: { bn: "সহজ মোড চালু", en: "Easy mode on" },
+  restart: { bn: "শুরু থেকে", en: "Restart" },
+  hintBlink: {
+    bn: "ক্যামেরার দিকে তাকিয়ে স্বাভাবিকভাবে দুইবার পলক ফেলুন",
+    en: "Look at the camera and blink twice naturally",
+  },
+  hintSmile: {
+    bn: "একটু বেশি করে হাসুন এবং ধরে রাখুন",
+    en: "Smile a bit wider and hold it",
+  },
+  hintTurn: {
+    bn: "ধীরে ধীরে মাথা ঘোরান, খুব বেশি নয়",
+    en: "Turn your head slowly, not too far",
+  },
+  hintNod: {
+    bn: "ধীরে ধীরে মাথা উপর-নিচ করুন",
+    en: "Slowly nod your head up and down",
+  },
+
   // Footer
   disclaimer: {
     bn: "ডেমো — ব্রাউজার-ভিত্তিক লাইভনেস (একক ক্যামেরা সিউডো-ডেপথ)। হার্ডওয়্যার 3D সেন্সরের বিকল্প নয়।",
@@ -107,6 +133,7 @@ export const STRINGS = {
   cancel: { bn: "বাতিল", en: "Cancel" },
   langLabel: { bn: "বাংলা", en: "English" },
 } as const satisfies Record<string, Pair>;
+
 
 export type StringKey = keyof typeof STRINGS;
 
