@@ -1277,6 +1277,7 @@ function LivenessScreen({
   hintText: string;
   easyMode: boolean;
   fps: number;
+  integrity: { currentIdx: number; passed: number; refCaptured: boolean; liveSim: number; decision: string };
   isDev: boolean;
   devOpen: boolean;
   onToggleDev: () => void;
