@@ -149,6 +149,8 @@ function LiveFaceAI() {
   const attemptsRef = useRef<number[]>([]); // attempts per challenge index
   const [easyMode, setEasyModeState] = useState(false);
   const [hintText, setHintText] = useState<string>("");
+  const hintTextRef = useRef<string>("");
+  useEffect(() => { hintTextRef.current = hintText; }, [hintText]);
   const sessionStartRef = useRef<number>(0);
   const challengeRunningMsRef = useRef<number>(0);
   const lastTickRef = useRef<number>(0);
