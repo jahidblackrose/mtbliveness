@@ -92,7 +92,7 @@ function LiveFaceAI() {
   const lastGuidanceChangeRef = useRef<number>(0);
   const guidanceDraftRef = useRef<string>("");
   const [centered, setCentered] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // (legacy in-camera countdown removed — use bigCountdown for post-pass 3-2-1)
   const [timeLeft, setTimeLeft] = useState<number>(CHALLENGE_TIMEOUT_MS);
   const [flash, setFlash] = useState(false);
   const [blinkTick, setBlinkTick] = useState(0);
@@ -347,7 +347,7 @@ function LiveFaceAI() {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     let lastTs = -1;
     let cancelled = false;
-    let captureScheduled = false;
+    // (post-pass capture sequence is managed by captureSeqRef now)
 
     const tick = () => {
       if (cancelled) return;
