@@ -405,21 +405,31 @@ export function updateChallenge(
 // ─────────────────────────────────────────────────────────────────────────────
 // Framing gate
 // ─────────────────────────────────────────────────────────────────────────────
+export type GuidanceKey =
+  | "center"
+  | "onePerson"
+  | "searching"
+  | "tooDark"
+  | "closer"
+  | "back"
+  | "straight"
+  | "holdStill";
+
 export function frameGuidance(
   faces: number,
   m: FaceMetrics | null,
   brightness: number,
-): { ok: boolean; text: string } {
-  if (faces === 0) return { ok: false, text: "Center your face in the oval" };
-  if (faces > 1) return { ok: false, text: "Only one person at a time" };
-  if (!m) return { ok: false, text: "Looking for your face…" };
-  if (brightness < TH.BRIGHT_MIN) return { ok: false, text: "Too dark — find better lighting" };
-  if (m.faceSize < TH.FACE_SIZE_MIN) return { ok: false, text: "Move closer" };
-  if (m.faceSize > TH.FACE_SIZE_MAX) return { ok: false, text: "Move back a little" };
-  if (m.centerOffset > TH.CENTER_MAX) return { ok: false, text: "Center your face" };
+): { ok: boolean; key: GuidanceKey } {
+  if (faces === 0) return { ok: false, key: "center" };
+  if (faces > 1) return { ok: false, key: "onePerson" };
+  if (!m) return { ok: false, key: "searching" };
+  if (brightness < TH.BRIGHT_MIN) return { ok: false, key: "tooDark" };
+  if (m.faceSize < TH.FACE_SIZE_MIN) return { ok: false, key: "closer" };
+  if (m.faceSize > TH.FACE_SIZE_MAX) return { ok: false, key: "back" };
+  if (m.centerOffset > TH.CENTER_MAX) return { ok: false, key: "center" };
   if (Math.abs(m.yaw) > 0.25 || Math.abs(m.pitch) > 0.25)
-    return { ok: false, text: "Face the camera straight on" };
-  return { ok: true, text: "Hold still" };
+    return { ok: false, key: "straight" };
+  return { ok: true, key: "holdStill" };
 }
 
 export function avgBrightness(ctx: CanvasRenderingContext2D, w: number, h: number) {
