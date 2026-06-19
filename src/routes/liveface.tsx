@@ -552,11 +552,12 @@ function LiveFaceAI() {
               // Auto-hint after first timeout on this challenge.
               setHintText(t(hintKeyFor(cur.kind) as Parameters<typeof t>[0], L));
 
-              // Enable easy mode if same challenge failed ≥ 2 times.
-              if (a >= 2 && !EASY.on) {
+              // Enable easy mode immediately after the first miss.
+              if (a >= 1 && !EASY.on) {
                 setEasyMode(true);
                 setEasyModeState(true);
               }
+
 
               if (a >= MAX_ATTEMPTS) {
                 // If at least 2 challenges already passed, accept and proceed.
