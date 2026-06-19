@@ -5,10 +5,11 @@ import {
   FilesetResolver,
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
-import { Camera, CheckCircle2, Languages, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   type ChallengeState,
+  type ChallengeKind,
   type Baseline,
   type FaceMetrics,
   type CalibAccumulator,
@@ -21,6 +22,9 @@ import {
   accumulate,
   finalizeBaseline,
   emptyAccumulator,
+  setEasyMode,
+  EASY,
+  TH,
   SpoofGuard,
 } from "@/lib/liveness";
 import {
@@ -47,7 +51,11 @@ export const Route = createFileRoute("/liveface")({
 
 type Step = "start" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error";
 
-const CHALLENGE_TIMEOUT_MS = 6_000;
+const CHALLENGE_TIMEOUT_MS = 20_000;
+const EASY_CHALLENGE_TIMEOUT_MS = 30_000;
+const SESSION_TIMEOUT_MS = 120_000;
+const MAX_ATTEMPTS = 3;
+const PROMPT_READ_DELAY_MS = 500;
 const CHALLENGE_BREATHER_MS = 400;
 const FRAMING_HOLD_MS = 500;
 const CALIBRATION_MS = 1500;
