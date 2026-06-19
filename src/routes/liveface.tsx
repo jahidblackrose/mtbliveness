@@ -25,6 +25,8 @@ import {
   setEasyMode,
   EASY,
   TH,
+  DIRECTION,
+  resetDirectionCalibration,
   SpoofGuard,
 } from "@/lib/liveness";
 import {
@@ -147,6 +149,8 @@ function LiveFaceAI() {
   const attemptsRef = useRef<number[]>([]); // attempts per challenge index
   const [easyMode, setEasyModeState] = useState(false);
   const [hintText, setHintText] = useState<string>("");
+  const hintTextRef = useRef<string>("");
+  useEffect(() => { hintTextRef.current = hintText; }, [hintText]);
   const sessionStartRef = useRef<number>(0);
   const challengeRunningMsRef = useRef<number>(0);
   const lastTickRef = useRef<number>(0);
@@ -388,6 +392,7 @@ function LiveFaceAI() {
       attemptsRef.current = [];
       setEasyModeState(false);
       setEasyMode(false);
+      resetDirectionCalibration();
       setPaused(false);
       setSoftTimeoutIdx(null);
       setHintText("");
@@ -735,6 +740,19 @@ function LiveFaceAI() {
                   setHintText("");
                 }, CONFIG.CHALLENGE_BREATHER_MS);
               } else {
+                // Surface wrong-way feedback for turn challenges in real time.
+                if (
+                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
+                  updated.wrongWay
+                ) {
+                  setHintText(t("wrongWay", langRef.current));
+                } else if (
+                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
+                  !updated.wrongWay &&
+                  hintTextRef.current === t("wrongWay", langRef.current)
+                ) {
+                  setHintText("");
+                }
                 setChallengeView([...challengesRef.current]);
               }
             }
@@ -1334,7 +1352,7 @@ function LivenessScreen({
 
             {isDev && (
               <p className="mt-2 text-[10px] text-white/40">
-                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw.toFixed(2)} · pitch {liveReadout.pitch.toFixed(2)}
+                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw >= 0 ? "+" : ""}{liveReadout.yaw.toFixed(2)} ({(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) > 0 ? "LEFT" : (liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) < 0 ? "RIGHT" : "—"}) · pitch {liveReadout.pitch >= 0 ? "+" : ""}{liveReadout.pitch.toFixed(2)} · Y±{DIRECTION.YAW_LEFT_SIGN} N±{DIRECTION.NOSE_LEFT_SIGN}
               </p>
             )}
           </div>
