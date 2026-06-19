@@ -715,7 +715,9 @@ function LiveFaceAI() {
             activeIdx={activeIdx}
             guidance={guidanceText}
             centered={centered}
-            countdown={countdown}
+            countdown={bigCountdown}
+            captureSeq={captureSeq}
+            liveReadout={liveReadout}
             timeLeft={timeLeft}
             timeoutMs={currentTimeoutMs}
             flash={flash}
