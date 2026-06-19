@@ -338,7 +338,18 @@ function LiveFaceAI() {
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
+      const dt = lastTs < 0 ? 0 : ts - lastTs;
       lastTs = ts;
+
+      // FPS readout (1Hz)
+      const fa = fpsAccumRef.current;
+      fa.frames += 1;
+      if (!fa.lastReport) fa.lastReport = ts;
+      if (ts - fa.lastReport > 1000) {
+        setFps(Math.round((fa.frames * 1000) / (ts - fa.lastReport)));
+        fa.frames = 0;
+        fa.lastReport = ts;
+      }
 
       let result: FaceLandmarkerResult;
       try {
