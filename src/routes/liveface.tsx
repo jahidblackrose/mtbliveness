@@ -902,20 +902,10 @@ function LiveFaceAI() {
               }
 
 
-              if (a >= CONFIG.MAX_ATTEMPTS) {
-                // If at least one challenge already passed, accept and proceed.
-                const passed = challengesRef.current.filter((c) => c.done).length;
-                if (passed >= 1) {
-                  challengesRef.current.forEach((c, i) => {
-                    if (i >= idx) challengesRef.current[i] = { ...c, done: true };
-                  });
-                  setChallengeView([...challengesRef.current]);
-                  challengeRunningMsRef.current = 0;
-                  return;
-                }
-                fail(t("failed", L));
-                return;
-              }
+              // Part A: NEVER auto-reset or auto-fail on timeouts. Always
+              // re-arm the CURRENT challenge via soft retry. Earlier passes
+              // stay locked in challengesRef.current. The user can tap
+              // Cancel for an explicit full restart.
               setSoftTimeoutIdx(idx);
 
             }
