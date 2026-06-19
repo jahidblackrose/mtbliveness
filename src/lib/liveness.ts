@@ -275,6 +275,7 @@ export const TH = {
   BLINK_HIGH_OFFSET: 0.35,  // closed threshold = baseline + this
   BLINK_LOW_OFFSET: 0.12,   // open threshold = baseline + this
   BLINK_EYE_SYM: 0.25,      // both eyes must move together (max diff at peak)
+  BLINK_REFRACTORY_MS: 250, // cooldown before next blink can count
   DEPTH_MIN_RATIO: 0.55,    // current depthSpread must be ≥ baseline * this
   PARALLAX_MIN: 0.012,      // noseRelZ change required over a head turn
 };
