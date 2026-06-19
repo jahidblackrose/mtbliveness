@@ -250,6 +250,14 @@ function LiveFaceAI() {
       setCalibProgress(0);
       captureBufRef.current = [];
       spoofRef.current = new SpoofGuard();
+      attemptsRef.current = [];
+      setEasyModeState(false);
+      setEasyMode(false);
+      setPaused(false);
+      setSoftTimeoutIdx(null);
+      setHintText("");
+      challengeRunningMsRef.current = 0;
+      sessionStartRef.current = performance.now();
       setStep("framing");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -275,14 +283,39 @@ function LiveFaceAI() {
     const now = performance.now();
     const initial = chosen.map((k) => newChallengeState(k, now));
     challengesRef.current = initial;
+    attemptsRef.current = initial.map(() => 0);
     setChallengeView(initial);
     setActiveIdx(0);
     challengeStartRef.current = now;
     challengePromptedAtRef.current = now;
     breatherUntilRef.current = 0;
+    challengeRunningMsRef.current = 0;
     setTimeLeft(CHALLENGE_TIMEOUT_MS);
+    setHintText("");
     setStep("liveness");
   }, []);
+
+  const tryAgainCurrent = useCallback(() => {
+    const idx = softTimeoutRef.current;
+    if (idx == null) return;
+    const cur = challengesRef.current[idx];
+    if (!cur) return;
+    const now = performance.now();
+    challengesRef.current[idx] = newChallengeState(cur.kind, now);
+    setChallengeView([...challengesRef.current]);
+    challengeStartRef.current = now;
+    challengePromptedAtRef.current = now;
+    challengeRunningMsRef.current = 0;
+    setTimeLeft(currentTimeoutRef.current);
+    setBlinkMeter(0);
+    setSmileMeter(0);
+    setPoseMeter(0);
+    setPaused(false);
+    setSoftTimeoutIdx(null);
+  }, []);
+
+  const togglePause = useCallback(() => setPaused((p) => !p), []);
+
 
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
