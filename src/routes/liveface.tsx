@@ -1,14 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaceLandmarker,
   FilesetResolver,
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
-import { Camera, CheckCircle2, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { Camera, CheckCircle2, Languages, RotateCcw, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  CHALLENGE_LABEL,
   type ChallengeState,
   type Baseline,
   type FaceMetrics,
@@ -24,6 +23,12 @@ import {
   emptyAccumulator,
   SpoofGuard,
 } from "@/lib/liveness";
+import {
+  CHALLENGE_KEY,
+  GUIDANCE_KEY,
+  type Lang,
+  t,
+} from "@/lib/liveness-i18n";
 
 export const Route = createFileRoute("/liveface")({
   ssr: false,
@@ -33,7 +38,7 @@ export const Route = createFileRoute("/liveface")({
       {
         name: "description",
         content:
-          "On-device active face liveness. Nothing is uploaded — your photo never leaves the browser.",
+          "On-device active face liveness with Bangla & English support. Nothing is uploaded — your photo never leaves the browser.",
       },
     ],
   }),
@@ -49,14 +54,17 @@ const CALIBRATION_MS = 1500;
 const PROMPT_REACTION_MIN_MS = 250;
 const CAPTURE_BUFFER = 5;
 
-type FrameSample = {
-  ts: number;
-  faces: number;
-  m: FaceMetrics | null;
-  brightness: number;
-};
-
 function LiveFaceAI() {
+  const [lang, setLang] = useState<Lang>("bn");
+  const langRef = useRef<Lang>("bn");
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
+  const tx = useCallback(
+    (k: Parameters<typeof t>[0], vars?: Record<string, string | number>) => t(k, lang, vars),
+    [lang],
+  );
+
   const [step, setStep] = useState<Step>("start");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -71,38 +79,32 @@ function LiveFaceAI() {
   const challengesRef = useRef<ChallengeState[]>([]);
   const [challengeView, setChallengeView] = useState<ChallengeState[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [guidance, setGuidance] = useState("Hold still");
+  const [guidanceText, setGuidanceText] = useState<string>("");
   const lastGuidanceChangeRef = useRef<number>(0);
   const guidanceDraftRef = useRef<string>("");
   const [centered, setCentered] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(CHALLENGE_TIMEOUT_MS);
   const [flash, setFlash] = useState(false);
+  const [blinkTick, setBlinkTick] = useState(0);
   const stepRef = useRef<Step>("start");
 
-  // Framing gate state
   const framingHoldStartRef = useRef<number | null>(null);
 
-  // Calibration state
   const calibAccRef = useRef<CalibAccumulator>(emptyAccumulator());
   const calibStartRef = useRef<number>(0);
   const baselineRef = useRef<Baseline | null>(null);
   const [calibProgress, setCalibProgress] = useState(0);
 
-  // Challenge transition state
   const challengeStartRef = useRef<number>(0);
   const challengePromptedAtRef = useRef<number>(0);
   const breatherUntilRef = useRef<number>(0);
 
-  // Live meters
   const [blinkMeter, setBlinkMeter] = useState(0);
   const [smileMeter, setSmileMeter] = useState(0);
   const [poseMeter, setPoseMeter] = useState(0);
 
-  // Capture buffer
   const captureBufRef = useRef<{ ts: number; brightness: number; centered: boolean }[]>([]);
-
-  // Anti-spoof
   const spoofRef = useRef<SpoofGuard>(new SpoofGuard());
 
   useEffect(() => {
@@ -112,7 +114,7 @@ function LiveFaceAI() {
   const stopAll = useCallback(() => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
   }, []);
 
@@ -147,7 +149,7 @@ function LiveFaceAI() {
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          fail("Could not capture frame");
+          fail(t("captureFail", langRef.current));
           return;
         }
         setPhotoUrl(URL.createObjectURL(blob));
@@ -163,14 +165,13 @@ function LiveFaceAI() {
     if (text === guidanceDraftRef.current) return;
     guidanceDraftRef.current = text;
     if (now - lastGuidanceChangeRef.current > 300) {
-      setGuidance(text);
+      setGuidanceText(text);
       lastGuidanceChangeRef.current = now;
     } else {
-      // schedule short debounce
       const target = text;
       window.setTimeout(() => {
         if (guidanceDraftRef.current === target) {
-          setGuidance(target);
+          setGuidanceText(target);
           lastGuidanceChangeRef.current = performance.now();
         }
       }, 320);
@@ -203,7 +204,6 @@ function LiveFaceAI() {
       });
       streamRef.current = stream;
 
-      // Reset state
       challengesRef.current = [];
       setChallengeView([]);
       setActiveIdx(0);
@@ -216,15 +216,13 @@ function LiveFaceAI() {
       setStep("framing");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      if (/Permission|denied|NotAllowed/i.test(msg))
-        fail("Camera permission was denied. Allow camera access and try again.");
-      else if (/NotFound|no.*camera/i.test(msg))
-        fail("No camera was found on this device.");
+      const L = langRef.current;
+      if (/Permission|denied|NotAllowed/i.test(msg)) fail(t("permDenied", L));
+      else if (/NotFound|no.*camera/i.test(msg)) fail(t("noCamera", L));
       else fail(msg);
     }
   }, [fail]);
 
-  // Attach the stream once the video element is mounted.
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     const v = videoRef.current;
@@ -249,7 +247,6 @@ function LiveFaceAI() {
     setStep("liveness");
   }, []);
 
-  // Main detection loop — single rAF across framing/calibration/liveness.
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     let lastTs = -1;
@@ -291,7 +288,6 @@ function LiveFaceAI() {
             )
           : null;
 
-      // Brightness sample
       const sctx = sample.getContext("2d");
       let brightness = 128;
       if (sctx) {
@@ -308,17 +304,15 @@ function LiveFaceAI() {
 
       const g = frameGuidance(faces, m, brightness);
       setCentered(g.ok);
-      setSmoothGuidance(g.text, ts);
+      setSmoothGuidance(t(GUIDANCE_KEY[g.key], langRef.current), ts);
 
-      // Track capture buffer for "cleanest of last 5 frames"
       captureBufRef.current.push({ ts, brightness, centered: g.ok });
       if (captureBufRef.current.length > CAPTURE_BUFFER) captureBufRef.current.shift();
 
       const currentStep = stepRef.current;
 
-      // Abort if a second face appears mid-flow.
       if ((currentStep === "calibrating" || currentStep === "liveness") && faces > 1) {
-        fail("Another face appeared. Please try again alone.");
+        fail(t("secondFace", langRef.current));
         return;
       }
 
@@ -335,7 +329,6 @@ function LiveFaceAI() {
         }
       } else if (currentStep === "calibrating") {
         if (!g.ok || !m) {
-          // restart calibration if framing drops
           calibAccRef.current = emptyAccumulator();
           calibStartRef.current = ts;
           setCalibProgress(0);
@@ -355,12 +348,12 @@ function LiveFaceAI() {
           spoofRef.current.push(m.fingerprint, brightness);
           const spoof = spoofRef.current.check(m, baseline);
           if (spoof) {
-            fail(`${spoof}. Please retry with a real face.`);
+            const L = langRef.current;
+            fail(spoof === "Flat surface detected" ? t("flatSurface", L) : t("noMotion", L));
             return;
           }
         }
 
-        // Live meters from raw metrics (even before challenge updates).
         if (m && baseline) {
           setBlinkMeter(Math.max(0, Math.min(1, m.blinkAvg)));
           setSmileMeter(
@@ -371,7 +364,6 @@ function LiveFaceAI() {
         if (g.ok && m && baseline && ts >= breatherUntilRef.current) {
           const idx = challengesRef.current.findIndex((c) => !c.done);
           if (idx === -1) {
-            // All challenges complete → countdown then capture.
             if (!captureScheduled) {
               captureScheduled = true;
               let n = 2;
@@ -383,7 +375,6 @@ function LiveFaceAI() {
                   setCountdown(null);
                   setFlash(true);
                   setTimeout(() => setFlash(false), 200);
-                  // Re-verify single face & centered at capture.
                   const recentOk = captureBufRef.current.filter((s) => s.centered).length;
                   if (recentOk >= 3 && stepRef.current === "liveness") capture();
                   else {
@@ -397,26 +388,29 @@ function LiveFaceAI() {
               }, 1000);
             }
           } else {
-            // Anti-replay: ignore actions before a human reaction delay.
             const sinceShown = ts - challengePromptedAtRef.current;
             if (sinceShown >= PROMPT_REACTION_MIN_MS) {
-              const updated = updateChallenge(
-                challengesRef.current[idx],
-                m,
-                baseline,
-                ts,
-              );
-              const wasDone = challengesRef.current[idx].done;
+              const prev = challengesRef.current[idx];
+              const updated = updateChallenge(prev, m, baseline, ts);
+              const wasDone = prev.done;
               challengesRef.current[idx] = updated;
               setPoseMeter(updated.poseProgress ?? 0);
 
+              // blink tick animation
+              if (
+                updated.kind === "blink" &&
+                updated.blinkJustCountedAt &&
+                updated.blinkJustCountedAt !== prev.blinkJustCountedAt
+              ) {
+                setBlinkTick((x) => x + 1);
+              }
+
               if (updated.done && !wasDone) {
-                // For turn challenges, require parallax to confirm 3D.
                 if (
                   (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
                   updated.parallaxOk === false
                 ) {
-                  fail("Flat surface detected during head turn.");
+                  fail(t("flatSurface", langRef.current));
                   return;
                 }
                 setChallengeView([...challengesRef.current]);
@@ -433,21 +427,19 @@ function LiveFaceAI() {
                   setPoseMeter(0);
                 }, CHALLENGE_BREATHER_MS);
               } else {
-                // Update view so live counters (blinkCount, smileIntensity) render.
                 setChallengeView([...challengesRef.current]);
               }
             }
           }
         }
 
-        // Per-challenge timeout
         const activeIndex = challengesRef.current.findIndex((c) => !c.done);
         if (activeIndex !== -1 && ts >= breatherUntilRef.current) {
           const elapsed = ts - challengeStartRef.current;
           const remaining = Math.max(0, CHALLENGE_TIMEOUT_MS - elapsed);
           setTimeLeft(remaining);
           if (remaining === 0) {
-            fail("Challenge timed out. Please try again.");
+            fail(t("timedOut", langRef.current));
             return;
           }
         }
@@ -478,16 +470,32 @@ function LiveFaceAI() {
     setErrorMsg("");
   }, [photoUrl, stopAll]);
 
+  const langClass = useMemo(
+    () => (lang === "bn" ? "font-bangla" : "font-sans"),
+    [lang],
+  );
+
   return (
-    <main className="min-h-dvh bg-zinc-950 text-zinc-100">
+    <main
+      className={`min-h-dvh bg-zinc-950 text-zinc-100 ${langClass}`}
+      style={{
+        fontFamily:
+          lang === "bn"
+            ? "'Noto Sans Bengali', 'Inter', system-ui, sans-serif"
+            : "'Inter', system-ui, sans-serif",
+      }}
+    >
       <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
-        <header className="flex items-center gap-2 pb-4">
-          <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
-          <h1 className="text-lg font-semibold tracking-tight">LiveFaceAI</h1>
+        <header className="flex items-center justify-between gap-2 pb-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
+            <h1 className="text-lg font-semibold tracking-tight">{tx("appName")}</h1>
+          </div>
+          <LangToggle lang={lang} onChange={setLang} />
         </header>
 
-        {step === "start" && <StartScreen onStart={start} />}
-        {step === "loading" && <LoadingScreen />}
+        {step === "start" && <StartScreen onStart={start} tx={tx} />}
+        {step === "loading" && <LoadingScreen tx={tx} />}
         {(step === "framing" || step === "calibrating" || step === "liveness") && (
           <LivenessScreen
             phase={step}
@@ -496,56 +504,78 @@ function LiveFaceAI() {
             sampleRef={sampleCanvasRef}
             challenges={challengeView}
             activeIdx={activeIdx}
-            guidance={guidance}
+            guidance={guidanceText}
             centered={centered}
             countdown={countdown}
             timeLeft={timeLeft}
             flash={flash}
+            blinkTick={blinkTick}
             calibProgress={calibProgress}
             blinkMeter={blinkMeter}
             smileMeter={smileMeter}
             poseMeter={poseMeter}
             onCancel={reset}
+            tx={tx}
           />
         )}
         {step === "result" && photoUrl && (
-          <ResultScreen photoUrl={photoUrl} onRetake={retake} onConfirm={reset} />
+          <ResultScreen photoUrl={photoUrl} onRetake={retake} onConfirm={reset} tx={tx} />
         )}
-        {step === "error" && <ErrorScreen msg={errorMsg} onRetry={start} onHome={reset} />}
+        {step === "error" && <ErrorScreen msg={errorMsg} onRetry={start} onHome={reset} tx={tx} />}
 
-        <footer className="mt-auto pt-6 text-center text-[11px] text-zinc-500">
-          Demonstration — browser-based liveness with monocular pseudo-depth. Not a
-          substitute for hardware 3D sensing.
+        <footer className="mt-auto pt-6 text-center text-[11px] leading-relaxed text-zinc-500">
+          {tx("disclaimer")}
         </footer>
       </div>
     </main>
   );
 }
 
-function StartScreen({ onStart }: { onStart: () => void }) {
+type Tx = (k: Parameters<typeof t>[0], vars?: Record<string, string | number>) => string;
+
+function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => void }) {
+  return (
+    <div
+      role="group"
+      aria-label="Language"
+      className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/60 p-0.5 text-xs"
+    >
+      <Languages className="ml-1.5 h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+      <button
+        onClick={() => onChange("bn")}
+        className={`rounded-full px-2.5 py-1 transition-colors ${
+          lang === "bn" ? "bg-emerald-500 text-zinc-950" : "text-zinc-300 hover:text-white"
+        }`}
+        style={{ fontFamily: "'Noto Sans Bengali', sans-serif" }}
+      >
+        বাংলা
+      </button>
+      <button
+        onClick={() => onChange("en")}
+        className={`rounded-full px-2.5 py-1 transition-colors ${
+          lang === "en" ? "bg-emerald-500 text-zinc-950" : "text-zinc-300 hover:text-white"
+        }`}
+      >
+        EN
+      </button>
+    </div>
+  );
+}
+
+function StartScreen({ onStart, tx }: { onStart: () => void; tx: Tx }) {
   return (
     <section className="space-y-6 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight">
-          Verify it's really you
-        </h2>
-        <p className="mt-2 text-sm text-zinc-400">
-          A quick liveness check using your camera. Your photo and video never leave
-          this device.
-        </p>
+        <h2 className="text-2xl font-semibold tracking-tight">{tx("startTitle")}</h2>
+        <p className="mt-2 text-sm text-zinc-400">{tx("startSubtitle")}</p>
       </div>
       <ol className="space-y-3 text-sm">
-        {[
-          "Allow camera access",
-          "Center your face in the oval",
-          "Complete 3 randomized challenges",
-          "We'll auto-capture your photo",
-        ].map((t, i) => (
-          <li key={t} className="flex items-start gap-3">
+        {(["step1", "step2", "step3", "step4"] as const).map((k, i) => (
+          <li key={k} className="flex items-start gap-3">
             <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-xs font-semibold text-emerald-400">
               {i + 1}
             </span>
-            <span className="text-zinc-300">{t}</span>
+            <span className="text-zinc-300">{tx(k)}</span>
           </li>
         ))}
       </ol>
@@ -555,17 +585,17 @@ function StartScreen({ onStart }: { onStart: () => void }) {
         className="w-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
       >
         <Camera className="mr-2 h-4 w-4" aria-hidden="true" />
-        Start verification
+        {tx("startBtn")}
       </Button>
     </section>
   );
 }
 
-function LoadingScreen() {
+function LoadingScreen({ tx }: { tx: Tx }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-400">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
-      <p className="text-sm">Loading on-device model…</p>
+      <p className="text-sm">{tx("loading")}</p>
     </div>
   );
 }
@@ -582,11 +612,13 @@ function LivenessScreen({
   countdown,
   timeLeft,
   flash,
+  blinkTick,
   calibProgress,
   blinkMeter,
   smileMeter,
   poseMeter,
   onCancel,
+  tx,
 }: {
   phase: "framing" | "calibrating" | "liveness";
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -599,11 +631,13 @@ function LivenessScreen({
   countdown: number | null;
   timeLeft: number;
   flash: boolean;
+  blinkTick: number;
   calibProgress: number;
   blinkMeter: number;
   smileMeter: number;
   poseMeter: number;
   onCancel: () => void;
+  tx: Tx;
 }) {
   const active = challenges[activeIdx];
   const totalSteps = challenges.length || 3;
@@ -611,15 +645,31 @@ function LivenessScreen({
   const timePct = Math.max(0, Math.min(100, (timeLeft / CHALLENGE_TIMEOUT_MS) * 100));
 
   let headerLabel = "";
-  if (phase === "framing") headerLabel = "Framing";
-  else if (phase === "calibrating") headerLabel = "Calibrating";
-  else headerLabel = `Step ${stepNum} of ${totalSteps}`;
+  if (phase === "framing") headerLabel = tx("framing");
+  else if (phase === "calibrating") headerLabel = tx("calibrating");
+  else headerLabel = tx("stepOf", { n: stepNum, t: totalSteps });
 
   let instruction = "";
-  if (phase === "framing") instruction = "Get into frame";
-  else if (phase === "calibrating") instruction = "Hold still…";
-  else if (active) instruction = CHALLENGE_LABEL[active.kind];
-  else instruction = "All set!";
+  if (phase === "framing") instruction = tx("getInFrame");
+  else if (phase === "calibrating") instruction = tx("holdStillEllipsis");
+  else if (active) instruction = tx(CHALLENGE_KEY[active.kind]);
+  else instruction = tx("allSet");
+
+  // Per-active counter line + meter content
+  let meterLine: string | null = null;
+  let meterValue = 0;
+  if (phase === "liveness" && active) {
+    if (active.kind === "blink") {
+      meterLine = tx("blinkCount", { n: active.blinkCount ?? 0 });
+      meterValue = blinkMeter;
+    } else if (active.kind === "smile") {
+      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("keepSmiling") : tx("showSmile");
+      meterValue = Math.max(smileMeter, active.smileIntensity ?? 0);
+    } else {
+      meterLine = tx("slowSteady");
+      meterValue = Math.max(poseMeter, active.poseProgress ?? 0);
+    }
+  }
 
   return (
     <section className="space-y-4">
@@ -628,9 +678,9 @@ function LivenessScreen({
         <button
           onClick={onCancel}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
-          aria-label="Cancel"
+          aria-label={tx("cancel")}
         >
-          <X className="h-3.5 w-3.5" aria-hidden="true" /> Cancel
+          <X className="h-3.5 w-3.5" aria-hidden="true" /> {tx("cancel")}
         </button>
       </div>
 
@@ -649,6 +699,73 @@ function LivenessScreen({
           className="absolute inset-0 h-full w-full"
         />
         <canvas ref={sampleRef} className="hidden" />
+
+        {/* TOP OVERLAY BAND — primary instruction + meter + guidance pinned high so eyes stay near lens */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
+          <div className="rounded-2xl bg-black/65 px-4 py-3 backdrop-blur-md ring-1 ring-white/10">
+            {/* timing bar */}
+            {(phase === "liveness" || phase === "calibrating") && (
+              <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/15">
+                <div
+                  className={`h-full transition-[width] duration-100 ${
+                    phase === "calibrating" ? "bg-sky-400" : "bg-emerald-400"
+                  }`}
+                  style={{
+                    width: `${phase === "calibrating" ? calibProgress * 100 : timePct}%`,
+                  }}
+                />
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wider text-white/60">
+                {headerLabel}
+              </span>
+              {phase === "liveness" && active?.kind === "blink" && (
+                <span
+                  key={blinkTick}
+                  className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
+                >
+                  {tx("blinkCount", { n: active.blinkCount ?? 0 })}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-lg font-semibold leading-tight text-white">
+              {instruction}
+            </p>
+            <p
+              className={`mt-1 text-xs ${
+                centered ? "text-emerald-200/90" : "text-amber-200/90"
+              }`}
+            >
+              {guidance}
+            </p>
+            {phase === "liveness" && meterLine && active?.kind !== "blink" && (
+              <p className="mt-1 text-[11px] text-white/70">{meterLine}</p>
+            )}
+            {phase === "liveness" && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
+                <div
+                  className="h-full bg-emerald-400 transition-[width] duration-100"
+                  style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Blink flash tick */}
+        {phase === "liveness" && active?.kind === "blink" && (
+          <div
+            key={`tick-${blinkTick}`}
+            className="pointer-events-none absolute inset-0 bg-emerald-400/20 opacity-0 animate-in fade-in zoom-in-95"
+            style={{
+              animationDuration: "180ms",
+              animationDirection: "alternate",
+              animationIterationCount: 2,
+            }}
+          />
+        )}
+
         <div
           className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
             flash ? "opacity-70" : "opacity-0"
@@ -661,130 +778,26 @@ function LivenessScreen({
             </div>
           </div>
         )}
+
+        {/* Bottom: tiny progress ring/dots only — keep gaze high */}
         {phase === "liveness" && (
-          <div className="absolute inset-x-0 top-0 p-3">
-            <div className="h-1 overflow-hidden rounded-full bg-zinc-700/60">
-              <div
-                className="h-full bg-emerald-400 transition-[width] duration-100"
-                style={{ width: `${timePct}%` }}
+          <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 p-3">
+            {challenges.map((c, i) => (
+              <span
+                key={i}
+                className={`h-1.5 rounded-full transition-all ${
+                  c.done
+                    ? "w-5 bg-emerald-400"
+                    : i === activeIdx
+                      ? "w-5 bg-white/80"
+                      : "w-1.5 bg-white/30"
+                }`}
               />
-            </div>
+            ))}
           </div>
         )}
-        {phase === "calibrating" && (
-          <div className="absolute inset-x-0 top-0 p-3">
-            <div className="h-1 overflow-hidden rounded-full bg-zinc-700/60">
-              <div
-                className="h-full bg-sky-400 transition-[width] duration-100"
-                style={{ width: `${calibProgress * 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-        <div className="absolute inset-x-0 bottom-0 p-4 text-center">
-          <p
-            className={`mx-auto inline-block rounded-full px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors ${
-              centered
-                ? "bg-emerald-500/20 text-emerald-200"
-                : "bg-amber-500/20 text-amber-200"
-            }`}
-          >
-            {guidance}
-          </p>
-        </div>
       </div>
-
-      <div
-        key={`${phase}-${activeIdx}`}
-        className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-center animate-in fade-in slide-in-from-bottom-2 duration-300"
-      >
-        <p className="text-xs uppercase tracking-wider text-zinc-500">
-          {phase === "liveness" ? "Challenge" : phase}
-        </p>
-        <p className="mt-1 text-xl font-semibold">{instruction}</p>
-
-        {phase === "liveness" && active?.kind === "blink" && (
-          <div className="mt-3 space-y-1.5">
-            <p className="text-xs text-zinc-400">
-              Blinks detected: {active.blinkCount ?? 0} / 2
-            </p>
-            <Meter value={blinkMeter} color="bg-emerald-400" label="Eye closure" />
-          </div>
-        )}
-        {phase === "liveness" && active?.kind === "smile" && (
-          <div className="mt-3 space-y-1.5">
-            <p className="text-xs text-zinc-400">
-              {(active.smileHoldStart ?? 0) > 0 ? "Keep smiling…" : "Show a smile"}
-            </p>
-            <Meter
-              value={Math.max(smileMeter, active.smileIntensity ?? 0)}
-              color="bg-emerald-400"
-              label="Smile"
-            />
-          </div>
-        )}
-        {phase === "liveness" &&
-          (active?.kind === "turnLeft" ||
-            active?.kind === "turnRight" ||
-            active?.kind === "nod") && (
-            <div className="mt-3 space-y-1.5">
-              <p className="text-xs text-zinc-400">Slow and steady</p>
-              <Meter
-                value={Math.max(poseMeter, active.poseProgress ?? 0)}
-                color="bg-emerald-400"
-                label="Movement"
-              />
-            </div>
-          )}
-      </div>
-
-      {phase === "liveness" && (
-        <ul className="flex items-center justify-center gap-3" aria-label="Progress">
-          {challenges.map((c, i) => (
-            <li
-              key={i}
-              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors ${
-                c.done
-                  ? "bg-emerald-500/15 text-emerald-300"
-                  : i === activeIdx
-                    ? "bg-zinc-800 text-zinc-200"
-                    : "bg-zinc-900 text-zinc-500"
-              }`}
-            >
-              {c.done ? (
-                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              ) : (
-                <span className="h-3.5 w-3.5 rounded-full border border-current" />
-              )}
-              {CHALLENGE_LABEL[c.kind].split(" ")[0]}
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
-  );
-}
-
-function Meter({
-  value,
-  color,
-  label,
-}: {
-  value: number;
-  color: string;
-  label: string;
-}) {
-  const pct = Math.max(0, Math.min(100, value * 100));
-  return (
-    <div>
-      <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
-        <div
-          className={`h-full ${color} transition-[width] duration-100`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="sr-only">{label}</span>
-    </div>
   );
 }
 
@@ -792,10 +805,12 @@ function ResultScreen({
   photoUrl,
   onRetake,
   onConfirm,
+  tx,
 }: {
   photoUrl: string;
   onRetake: () => void;
   onConfirm: () => void;
+  tx: Tx;
 }) {
   return (
     <section
@@ -805,12 +820,14 @@ function ResultScreen({
     >
       <div className="flex items-center justify-center gap-2 text-emerald-400">
         <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-        <p className="text-sm font-medium">Liveness verified</p>
+        <p className="text-sm font-medium">
+          {tx("livenessVerified")} — {tx("passed")}
+        </p>
       </div>
       <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
         <img
           src={photoUrl}
-          alt="Captured selfie after passing liveness check"
+          alt={tx("capturedAlt")}
           className="aspect-[3/4] w-full object-cover"
         />
       </div>
@@ -821,13 +838,13 @@ function ResultScreen({
           className="flex-1 border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
         >
           <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-          Retake
+          {tx("retake")}
         </Button>
         <Button
           onClick={onConfirm}
           className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
         >
-          Confirm
+          {tx("confirm")}
         </Button>
       </div>
     </section>
@@ -838,10 +855,12 @@ function ErrorScreen({
   msg,
   onRetry,
   onHome,
+  tx,
 }: {
   msg: string;
   onRetry: () => void;
   onHome: () => void;
+  tx: Tx;
 }) {
   return (
     <section className="space-y-4 pt-6 text-center animate-in fade-in duration-300">
@@ -849,7 +868,7 @@ function ErrorScreen({
         <X className="h-6 w-6" aria-hidden="true" />
       </div>
       <div>
-        <h2 className="text-lg font-semibold">Verification failed</h2>
+        <h2 className="text-lg font-semibold">{tx("failed")}</h2>
         <p className="mt-1 text-sm text-zinc-400">{msg}</p>
       </div>
       <div className="flex gap-3">
@@ -858,13 +877,13 @@ function ErrorScreen({
           onClick={onHome}
           className="flex-1 border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
         >
-          Back
+          {tx("back2")}
         </Button>
         <Button
           onClick={onRetry}
           className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
         >
-          Try again
+          {tx("retry")}
         </Button>
       </div>
     </section>

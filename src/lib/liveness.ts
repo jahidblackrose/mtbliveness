@@ -239,6 +239,8 @@ export type ChallengeState = {
   blinkCount?: number;
   blinkPhase?: "open" | "closed";
   blinkEma?: number;
+  blinkLastCountedAt?: number; // refractory cooldown anchor
+  blinkJustCountedAt?: number; // for UI flash animation
   // smile
   smileEma?: number;
   smileHoldStart?: number; // ms when smile rose above threshold
@@ -253,7 +255,8 @@ export type ChallengeState = {
 
 export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
   const base: ChallengeState = { kind, done: false, startedAt: now };
-  if (kind === "blink") return { ...base, blinkCount: 0, blinkPhase: "open", blinkEma: 0 };
+  if (kind === "blink")
+    return { ...base, blinkCount: 0, blinkPhase: "open", blinkEma: 0, blinkLastCountedAt: 0 };
   if (kind === "smile") return { ...base, smileEma: 0, smileIntensity: 0 };
   return base;
 }
@@ -272,6 +275,7 @@ export const TH = {
   BLINK_HIGH_OFFSET: 0.35,  // closed threshold = baseline + this
   BLINK_LOW_OFFSET: 0.12,   // open threshold = baseline + this
   BLINK_EYE_SYM: 0.25,      // both eyes must move together (max diff at peak)
+  BLINK_REFRACTORY_MS: 250, // cooldown before next blink can count
   DEPTH_MIN_RATIO: 0.55,    // current depthSpread must be ≥ baseline * this
   PARALLAX_MIN: 0.012,      // noseRelZ change required over a head turn
 };
@@ -286,7 +290,7 @@ export function updateChallenge(
 
   switch (state.kind) {
     case "blink": {
-      // Light EMA so peaks survive.
+      // Light EMA so peaks survive on low FPS.
       const prev = state.blinkEma ?? m.blinkAvg;
       const ema = prev * 0.4 + m.blinkAvg * 0.6;
 
@@ -296,16 +300,31 @@ export function updateChallenge(
 
       let phase = state.blinkPhase ?? "open";
       let count = state.blinkCount ?? 0;
-      if (phase === "open" && ema > highThresh && eyesSymmetric) phase = "closed";
-      else if (phase === "closed" && ema < lowThresh) {
+      let lastCountedAt = state.blinkLastCountedAt ?? 0;
+      let justCountedAt = state.blinkJustCountedAt;
+
+      if (phase === "open" && ema > highThresh && eyesSymmetric) {
+        phase = "closed";
+      } else if (
+        phase === "closed" &&
+        ema < lowThresh &&
+        now - lastCountedAt > TH.BLINK_REFRACTORY_MS
+      ) {
         phase = "open";
         count += 1;
+        lastCountedAt = now;
+        justCountedAt = now;
+      } else if (phase === "closed" && ema < lowThresh) {
+        // open up but suppressed by refractory
+        phase = "open";
       }
       return {
         ...state,
         blinkEma: ema,
         blinkPhase: phase,
         blinkCount: count,
+        blinkLastCountedAt: lastCountedAt,
+        blinkJustCountedAt: justCountedAt,
         done: count >= 2,
       };
     }
@@ -386,21 +405,31 @@ export function updateChallenge(
 // ─────────────────────────────────────────────────────────────────────────────
 // Framing gate
 // ─────────────────────────────────────────────────────────────────────────────
+export type GuidanceKey =
+  | "center"
+  | "onePerson"
+  | "searching"
+  | "tooDark"
+  | "closer"
+  | "back"
+  | "straight"
+  | "holdStill";
+
 export function frameGuidance(
   faces: number,
   m: FaceMetrics | null,
   brightness: number,
-): { ok: boolean; text: string } {
-  if (faces === 0) return { ok: false, text: "Center your face in the oval" };
-  if (faces > 1) return { ok: false, text: "Only one person at a time" };
-  if (!m) return { ok: false, text: "Looking for your face…" };
-  if (brightness < TH.BRIGHT_MIN) return { ok: false, text: "Too dark — find better lighting" };
-  if (m.faceSize < TH.FACE_SIZE_MIN) return { ok: false, text: "Move closer" };
-  if (m.faceSize > TH.FACE_SIZE_MAX) return { ok: false, text: "Move back a little" };
-  if (m.centerOffset > TH.CENTER_MAX) return { ok: false, text: "Center your face" };
+): { ok: boolean; key: GuidanceKey } {
+  if (faces === 0) return { ok: false, key: "center" };
+  if (faces > 1) return { ok: false, key: "onePerson" };
+  if (!m) return { ok: false, key: "searching" };
+  if (brightness < TH.BRIGHT_MIN) return { ok: false, key: "tooDark" };
+  if (m.faceSize < TH.FACE_SIZE_MIN) return { ok: false, key: "closer" };
+  if (m.faceSize > TH.FACE_SIZE_MAX) return { ok: false, key: "back" };
+  if (m.centerOffset > TH.CENTER_MAX) return { ok: false, key: "center" };
   if (Math.abs(m.yaw) > 0.25 || Math.abs(m.pitch) > 0.25)
-    return { ok: false, text: "Face the camera straight on" };
-  return { ok: true, text: "Hold still" };
+    return { ok: false, key: "straight" };
+  return { ok: true, key: "holdStill" };
 }
 
 export function avgBrightness(ctx: CanvasRenderingContext2D, w: number, h: number) {
