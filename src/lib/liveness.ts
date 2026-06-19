@@ -447,22 +447,56 @@ export function updateChallenge(
 
     case "turnLeft":
     case "turnRight": {
-      // Mirrored video: user's left ↔ image right.
-      const targetSign = state.kind === "turnLeft" ? 1 : -1;
-      const yawRel = (m.yaw - baseline.yaw) * targetSign;
-      const noseRel = (m.noseDx - baseline.noseDx) * targetSign;
+      // Target direction in "user perspective": +1 = user's LEFT, -1 = RIGHT.
+      const targetDir = state.kind === "turnLeft" ? 1 : -1;
+
+      // Raw signed deltas from baseline.
+      const yawDelta = m.yaw - baseline.yaw;
+      const noseDelta = m.noseDx - baseline.noseDx;
+
+      // Project each signal onto the target direction via DIRECTION mapping.
+      // Positive ⇒ moving the requested way; Negative ⇒ moving the WRONG way.
+      const yawToward = yawDelta * DIRECTION.YAW_LEFT_SIGN * targetDir;
+      const noseToward = noseDelta * DIRECTION.NOSE_LEFT_SIGN * targetDir;
 
       const yawTh = TH.YAW_TURN_ABS * mul;
       const noseTh = TH.NOSE_TURN_ABS * mul;
+
+      // Self-calibration: if a signal shows a CLEAR, sustained movement that
+      // is opposite to the target while the other signal agrees with the
+      // target (or is small), flip THAT signal's sign once per session.
+      const yawMag = Math.abs(yawDelta);
+      const noseMag = Math.abs(noseDelta);
+      const elapsed = now - state.startedAt;
+      if (elapsed > 900) {
+        if (!DIRECTION.calibratedYaw && yawMag > yawTh * 1.1 && yawToward < -yawTh * 0.5) {
+          // yaw strongly opposes target — flip if nose agrees or is neutral.
+          if (noseToward > -noseTh * 0.3) {
+            DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
+            DIRECTION.calibratedYaw = true;
+          }
+        }
+        if (!DIRECTION.calibratedNose && noseMag > noseTh * 1.1 && noseToward < -noseTh * 0.5) {
+          if (yawToward > -yawTh * 0.3) {
+            DIRECTION.NOSE_LEFT_SIGN = (DIRECTION.NOSE_LEFT_SIGN * -1) as 1 | -1;
+            DIRECTION.calibratedNose = true;
+          }
+        }
+      }
+
+      // Recompute after potential flip.
+      const yawT2 = yawDelta * DIRECTION.YAW_LEFT_SIGN * targetDir;
+      const noseT2 = noseDelta * DIRECTION.NOSE_LEFT_SIGN * targetDir;
+
       const progress = Math.max(
         0,
-        Math.min(1, Math.max(yawRel / yawTh, noseRel / noseTh)),
+        Math.min(1, Math.max(yawT2 / yawTh, noseT2 / noseTh)),
       );
 
-      // Parallax (anti-spoof): unchanged but use whichever signal is moving.
+      // Parallax (anti-spoof) — only count toward-target motion.
       let pStartZ = state.parallaxStartNoseRelZ;
       let pStartYaw = state.parallaxStartYaw;
-      if (pStartZ === undefined && (yawRel > yawTh * 0.25 || noseRel > noseTh * 0.25)) {
+      if (pStartZ === undefined && (yawT2 > yawTh * 0.25 || noseT2 > noseTh * 0.25)) {
         pStartZ = m.noseRelZ;
         pStartYaw = m.yaw;
       }
@@ -473,14 +507,27 @@ export function updateChallenge(
         if (dyaw > yawTh * 0.6) parallaxOk = dz > TH.PARALLAX_MIN;
       }
 
-      // Momentary reach is enough — EITHER pose-matrix yaw OR nose offset.
-      const reached = yawRel > yawTh || noseRel > noseTh;
+      // DIRECTION-AWARE pass condition:
+      //  - at least one signal must exceed its threshold IN the target direction
+      //  - AND no signal may strongly oppose the target (prevents wrong-way pass
+      //    when yaw/nose sign conventions disagree).
+      const yawOK = yawT2 > yawTh;
+      const noseOK = noseT2 > noseTh;
+      const noOpposing = yawT2 > -yawTh * 0.35 && noseT2 > -noseTh * 0.35;
+      const reached = (yawOK || noseOK) && noOpposing;
+
+      // Wrong-way feedback: user produced a clearly wrong-direction movement.
+      const wrongWay =
+        !reached &&
+        (yawT2 < -yawTh * 0.5 || noseT2 < -noseTh * 0.5);
+
       return {
         ...state,
         poseProgress: progress,
         parallaxStartNoseRelZ: pStartZ,
         parallaxStartYaw: pStartYaw,
         parallaxOk,
+        wrongWay,
         done: reached,
       };
     }
