@@ -723,6 +723,34 @@ function LiveFaceAI() {
           // ALL CHALLENGES PASSED — explicit capture sequence:
           // success (brief celebration) → lookStraight (hold) → 3-2-1 → capture
           const seq = captureSeqRef.current;
+
+          // Finalize the reference signature once at the boundary.
+          if (referenceSigRef.current == null && refSigSamplesRef.current.length > 0) {
+            referenceSigRef.current = avgSignatures(refSigSamplesRef.current);
+            setRefSigCaptured(!!referenceSigRef.current);
+          }
+
+          // Part B: continuously compare current face to reference signature.
+          // Only meaningful when reference exists and a face is present.
+          const ref = referenceSigRef.current;
+          const cur = lastSignatureRef.current;
+          if (ref && cur) {
+            const sim = signatureSimilarity(ref, cur);
+            setLiveSim(sim);
+            if (sim < INTEGRITY.SIM_PASS) {
+              if (integrityFailStartRef.current == null) integrityFailStartRef.current = ts;
+              if (ts - integrityFailStartRef.current >= INTEGRITY.FAIL_SUSTAIN_MS) {
+                integrityRestart("changed");
+                return;
+              }
+            } else {
+              integrityFailStartRef.current = null;
+            }
+          } else if (!cur) {
+            // No face present: don't accumulate mismatch time (Part A: pause).
+            integrityFailStartRef.current = null;
+          }
+
           if (seq === "idle") {
             captureSeqRef.current = "success";
             setCaptureSeq("success");
@@ -782,6 +810,18 @@ function LiveFaceAI() {
             }
           }
         } else if (canRun && m && baseline) {
+          // Sample reference signature ONLY during active challenge engagement
+          // with the verified person (frontal-ish, one face, framing OK). Cap
+          // the buffer so we don't grow unbounded.
+          if (
+            result.faceLandmarks?.[0] &&
+            faces === 1 &&
+            Math.abs(m.yaw) < 0.22 &&
+            Math.abs(m.pitch) < 0.22 &&
+            refSigSamplesRef.current.length < 90
+          ) {
+            refSigSamplesRef.current.push(computeSignature(result.faceLandmarks[0]));
+          }
           const sinceShown = ts - challengePromptedAtRef.current;
           if (sinceShown >= CONFIG.PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
