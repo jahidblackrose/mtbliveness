@@ -798,16 +798,108 @@ function LiveFaceAI() {
   const retake = useCallback(() => {
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     setPhotoUrl(null);
+    setImageBlob(null);
+    setVideoBlob(null);
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    setVideoUrl(null);
+    setSubmitState("idle");
+    setSubmitError("");
+
+    // If we still have a live stream, just rerun the post-pass capture
+    // (challenges already passed). Otherwise fall back to a full start.
+    const stream = streamRef.current;
+    if (stream && stream.getTracks().some((t) => t.readyState === "live")) {
+      startRecorder(stream);
+      // Mark all challenges done, jump to lookStraight + 3-2-1
+      challengesRef.current = challengesRef.current.map((c) => ({ ...c, done: true }));
+      setChallengeView([...challengesRef.current]);
+      captureSeqRef.current = "lookStraight";
+      setCaptureSeq("lookStraight");
+      setBigCountdown(null);
+      lookStraightHoldRef.current = null;
+      if (captureIntervalRef.current != null) {
+        window.clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
+      setStep("liveness");
+      return;
+    }
     void start();
-  }, [photoUrl, start]);
+  }, [photoUrl, start, startRecorder, videoUrl]);
 
   const reset = useCallback(() => {
     stopAll();
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     setPhotoUrl(null);
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    setVideoUrl(null);
+    setImageBlob(null);
+    setVideoBlob(null);
+    setSubmitState("idle");
+    setSubmitError("");
     setStep("start");
     setErrorMsg("");
-  }, [photoUrl, stopAll]);
+  }, [photoUrl, stopAll, videoUrl]);
+
+  const buildMeta = useCallback(() => {
+    const session = sessionMetaRef.current;
+    return {
+      sessionId: session?.sessionId ?? null,
+      timestamp: new Date().toISOString(),
+      startedAt: session?.startedAt ?? null,
+      challengesIssued: challengesRef.current.map((c, i) => ({ order: i, kind: c.kind })),
+      perChallengeResult: challengesRef.current.map((c) => ({
+        kind: c.kind,
+        done: c.done,
+        blinkCount: c.blinkCount ?? 0,
+        smileIntensity: c.smileIntensity ?? 0,
+        poseProgress: c.poseProgress ?? 0,
+        parallaxOk: c.parallaxOk ?? null,
+      })),
+      blinkCount: challengesRef.current
+        .filter((c) => c.kind === "blink")
+        .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
+      livenessScore: challengesRef.current.length
+        ? challengesRef.current.filter((c) => c.done).length / challengesRef.current.length
+        : 0,
+      language: langRef.current,
+      easyModeUsed: easyMode,
+      videoSupported,
+      videoMime: recorderMimeRef.current ?? null,
+      spoofFlags: [] as string[],
+    };
+  }, [easyMode, videoSupported]);
+
+  const submit = useCallback(async () => {
+    if (!imageBlob) return;
+    setSubmitState("uploading");
+    setSubmitError("");
+    const fd = new FormData();
+    fd.append("image", imageBlob, "selfie.jpg");
+    if (videoBlob) fd.append("video", videoBlob, "liveness.webm");
+    fd.append("meta", JSON.stringify(buildMeta()));
+
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT_MS);
+    try {
+      const res = await fetch(API_ENDPOINT, {
+        method: "POST",
+        headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : undefined,
+        body: fd,
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSubmitState("ok");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      setSubmitError(msg);
+      setSubmitState("fail");
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }, [buildMeta, imageBlob, videoBlob]);
+
+
 
   const langClass = useMemo(
     () => (lang === "bn" ? "font-bangla" : "font-sans"),
