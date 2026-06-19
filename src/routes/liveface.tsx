@@ -92,7 +92,7 @@ function LiveFaceAI() {
   const lastGuidanceChangeRef = useRef<number>(0);
   const guidanceDraftRef = useRef<string>("");
   const [centered, setCentered] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // (legacy in-camera countdown removed — use bigCountdown for post-pass 3-2-1)
   const [timeLeft, setTimeLeft] = useState<number>(CHALLENGE_TIMEOUT_MS);
   const [flash, setFlash] = useState(false);
   const [blinkTick, setBlinkTick] = useState(0);
@@ -137,6 +137,19 @@ function LiveFaceAI() {
 
   const [devOpen, setDevOpen] = useState(false);
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
+
+  // Post-pass capture sequence: success → lookStraight → countdown → capturing
+  type CaptureSeq = "idle" | "success" | "lookStraight" | "countdown" | "capturing";
+  const [captureSeq, setCaptureSeq] = useState<CaptureSeq>("idle");
+  const captureSeqRef = useRef<CaptureSeq>("idle");
+  useEffect(() => { captureSeqRef.current = captureSeq; }, [captureSeq]);
+  const [bigCountdown, setBigCountdown] = useState<number | null>(null);
+  const lookStraightHoldRef = useRef<number | null>(null);
+  const lastFramingOkRef = useRef(false);
+  const captureIntervalRef = useRef<number | null>(null);
+
+  const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
+  const readoutAccumRef = useRef(0);
 
   const currentTimeoutMs = easyMode ? EASY_CHALLENGE_TIMEOUT_MS : CHALLENGE_TIMEOUT_MS;
   const currentTimeoutRef = useRef(CHALLENGE_TIMEOUT_MS);
@@ -257,6 +270,14 @@ function LiveFaceAI() {
       setPaused(false);
       setSoftTimeoutIdx(null);
       setHintText("");
+      setCaptureSeq("idle");
+      captureSeqRef.current = "idle";
+      setBigCountdown(null);
+      lookStraightHoldRef.current = null;
+      if (captureIntervalRef.current != null) {
+        window.clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
       challengeRunningMsRef.current = 0;
       sessionStartRef.current = performance.now();
       setStep("framing");
@@ -293,6 +314,10 @@ function LiveFaceAI() {
     challengeRunningMsRef.current = 0;
     setTimeLeft(CHALLENGE_TIMEOUT_MS);
     setHintText("");
+    setCaptureSeq("idle");
+    captureSeqRef.current = "idle";
+    setBigCountdown(null);
+    lookStraightHoldRef.current = null;
     setStep("liveness");
   }, []);
 
@@ -322,7 +347,7 @@ function LiveFaceAI() {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     let lastTs = -1;
     let cancelled = false;
-    let captureScheduled = false;
+    // (post-pass capture sequence is managed by captureSeqRef now)
 
     const tick = () => {
       if (cancelled) return;
@@ -386,7 +411,20 @@ function LiveFaceAI() {
 
       const g = frameGuidance(faces, m, brightness);
       setCentered(g.ok);
+      lastFramingOkRef.current = g.ok;
       setSmoothGuidance(t(GUIDANCE_KEY[g.key], langRef.current), ts);
+
+      // Throttled dev readout (5Hz)
+      readoutAccumRef.current += dt;
+      if (m && readoutAccumRef.current > 200) {
+        readoutAccumRef.current = 0;
+        setLiveReadout({
+          blink: m.blinkMax,
+          smile: m.smileMax,
+          yaw: m.yaw,
+          pitch: m.pitch,
+        });
+      }
 
       captureBufRef.current.push({ ts, brightness, centered: g.ok });
       if (captureBufRef.current.length > CAPTURE_BUFFER) captureBufRef.current.shift();
@@ -467,31 +505,66 @@ function LiveFaceAI() {
           ts >= breatherUntilRef.current;
 
 
-        if (canRun && idx === -1) {
-          if (!captureScheduled) {
-            captureScheduled = true;
-            let n = 2;
-            setCountdown(n);
-            const iv = window.setInterval(() => {
-              n -= 1;
-              if (n <= 0) {
-                window.clearInterval(iv);
-                setCountdown(null);
-                setFlash(true);
-                setTimeout(() => setFlash(false), 200);
-                const recentOk = captureBufRef.current.filter((s) => s.centered).length;
-                if (recentOk >= 3 && stepRef.current === "liveness") capture();
-                else {
-                  captureScheduled = false;
-                  framingHoldStartRef.current = null;
-                  setStep("framing");
-                }
-              } else {
-                setCountdown(n);
+        if (idx === -1) {
+          // ALL CHALLENGES PASSED — explicit capture sequence:
+          // success (brief celebration) → lookStraight (hold) → 3-2-1 → capture
+          const seq = captureSeqRef.current;
+          if (seq === "idle") {
+            captureSeqRef.current = "success";
+            setCaptureSeq("success");
+            window.setTimeout(() => {
+              if (stepRef.current !== "liveness") return;
+              if (captureSeqRef.current !== "success") return;
+              captureSeqRef.current = "lookStraight";
+              setCaptureSeq("lookStraight");
+              lookStraightHoldRef.current = null;
+            }, 900);
+          } else if (seq === "lookStraight") {
+            const frontal =
+              !!m && g.ok && Math.abs(m.yaw) < 0.18 && Math.abs(m.pitch) < 0.18;
+            if (frontal) {
+              if (lookStraightHoldRef.current == null) lookStraightHoldRef.current = ts;
+              if (ts - lookStraightHoldRef.current >= 500) {
+                captureSeqRef.current = "countdown";
+                setCaptureSeq("countdown");
+                let n = 3;
+                setBigCountdown(n);
+                const iv = window.setInterval(() => {
+                  if (captureSeqRef.current !== "countdown") {
+                    window.clearInterval(iv);
+                    captureIntervalRef.current = null;
+                    return;
+                  }
+                  if (!lastFramingOkRef.current) {
+                    window.clearInterval(iv);
+                    captureIntervalRef.current = null;
+                    setBigCountdown(null);
+                    captureSeqRef.current = "lookStraight";
+                    setCaptureSeq("lookStraight");
+                    lookStraightHoldRef.current = null;
+                    return;
+                  }
+                  n -= 1;
+                  if (n <= 0) {
+                    window.clearInterval(iv);
+                    captureIntervalRef.current = null;
+                    setBigCountdown(null);
+                    captureSeqRef.current = "capturing";
+                    setCaptureSeq("capturing");
+                    setFlash(true);
+                    setTimeout(() => setFlash(false), 200);
+                    if (stepRef.current === "liveness") capture();
+                  } else {
+                    setBigCountdown(n);
+                  }
+                }, 1000);
+                captureIntervalRef.current = iv;
               }
-            }, 1000);
+            } else {
+              lookStraightHoldRef.current = null;
+            }
           }
-        } else if (canRun && idx !== -1 && m && baseline) {
+        } else if (canRun && m && baseline) {
           const sinceShown = ts - challengePromptedAtRef.current;
           if (sinceShown >= PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
@@ -621,7 +694,7 @@ function LiveFaceAI() {
             : "'Inter', system-ui, sans-serif",
       }}
     >
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
+      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6 lg:max-w-5xl lg:px-6">
         <header className="flex items-center justify-between gap-2 pb-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
@@ -642,7 +715,9 @@ function LiveFaceAI() {
             activeIdx={activeIdx}
             guidance={guidanceText}
             centered={centered}
-            countdown={countdown}
+            countdown={bigCountdown}
+            captureSeq={captureSeq}
+            liveReadout={liveReadout}
             timeLeft={timeLeft}
             timeoutMs={currentTimeoutMs}
             flash={flash}
@@ -759,6 +834,8 @@ function LivenessScreen({
   guidance,
   centered,
   countdown,
+  captureSeq,
+  liveReadout,
   timeLeft,
   timeoutMs,
   flash,
@@ -790,6 +867,8 @@ function LivenessScreen({
   guidance: string;
   centered: boolean;
   countdown: number | null;
+  captureSeq: "idle" | "success" | "lookStraight" | "countdown" | "capturing";
+  liveReadout: { blink: number; smile: number; yaw: number; pitch: number };
   timeLeft: number;
   timeoutMs: number;
   flash: boolean;
@@ -819,32 +898,41 @@ function LivenessScreen({
   const secondsLeft = Math.ceil(timeLeft / 1000);
   const amber = phase === "liveness" && timeLeft > 0 && timeLeft <= 5000;
   const inSoft = softTimeoutIdx != null;
+  const inCapture = phase === "liveness" && captureSeq !== "idle";
 
   let headerLabel = "";
   if (phase === "framing") headerLabel = tx("framing");
   else if (phase === "calibrating") headerLabel = tx("calibrating");
+  else if (inCapture) headerLabel = tx("allDone");
   else headerLabel = tx("stepOf", { n: stepNum, t: totalSteps });
 
   let instruction = "";
   if (phase === "framing") instruction = tx("getInFrame");
   else if (phase === "calibrating") instruction = tx("holdStillEllipsis");
+  else if (captureSeq === "success") instruction = tx("allDone");
+  else if (captureSeq === "lookStraight") instruction = tx("lookStraight");
+  else if (captureSeq === "countdown") instruction = tx("hold");
+  else if (captureSeq === "capturing") instruction = tx("capturing");
   else if (active) instruction = tx(CHALLENGE_KEY[active.kind]);
   else instruction = tx("allSet");
 
   let meterLine: string | null = null;
   let meterValue = 0;
-  if (phase === "liveness" && active) {
+  if (phase === "liveness" && !inCapture && active) {
     if (active.kind === "blink") {
-      meterLine = tx("blinkCount", { n: active.blinkCount ?? 0 });
+      meterLine = tx("blinkProgress", { n: active.blinkCount ?? 0 });
       meterValue = blinkMeter;
     } else if (active.kind === "smile") {
-      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("keepSmiling") : tx("showSmile");
+      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("smileHold") : tx("showSmile");
       meterValue = Math.max(smileMeter, active.smileIntensity ?? 0);
     } else {
       meterLine = tx("slowSteady");
       meterValue = Math.max(poseMeter, active.poseProgress ?? 0);
     }
   }
+
+  // Demo icon — only during running challenges; success/capture show a check.
+  const showDemo = phase === "liveness" && !inCapture && !!active;
 
   return (
     <section className="space-y-4">
@@ -858,7 +946,7 @@ function LivenessScreen({
           )}
         </span>
         <div className="flex items-center gap-1">
-          {phase === "liveness" && (
+          {phase === "liveness" && !inCapture && (
             <button
               onClick={onTogglePause}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
@@ -887,26 +975,14 @@ function LivenessScreen({
         </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          autoPlay
-          className="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
-        />
-        <canvas
-          ref={overlayRef}
-          width={400}
-          height={533}
-          className="absolute inset-0 h-full w-full"
-        />
-        <canvas ref={sampleRef} className="hidden" />
-
-        {/* TOP OVERLAY BAND */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
-          <div className="rounded-2xl bg-black/65 px-4 py-3 backdrop-blur-md ring-1 ring-white/10">
-            {(phase === "liveness" || phase === "calibrating") && (
+      {/* TWO-ZONE LAYOUT: message band on top (mobile) / left (desktop),
+          camera card below (mobile) / right (desktop). The instruction
+          never overlaps the face. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start lg:gap-6">
+        {/* MESSAGE BAND */}
+        <div className="order-1 lg:order-1">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 shadow-md">
+            {(phase === "liveness" || phase === "calibrating") && !inCapture && (
               <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/15">
                 <div
                   className={`h-full transition-[width] duration-100 ${
@@ -927,7 +1003,7 @@ function LivenessScreen({
                 {headerLabel}
               </span>
               <div className="flex items-center gap-2">
-                {phase === "liveness" && !inSoft && (
+                {phase === "liveness" && !inSoft && !inCapture && (
                   <span
                     className={`text-[11px] font-semibold tabular-nums ${
                       amber ? "text-amber-300" : "text-white/70"
@@ -936,29 +1012,54 @@ function LivenessScreen({
                     {paused ? tx("paused") : `${secondsLeft}s`}
                   </span>
                 )}
-                {phase === "liveness" && active?.kind === "blink" && (
+                {phase === "liveness" && !inCapture && active?.kind === "blink" && (
                   <span
                     key={blinkTick}
                     className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
                   >
-                    {tx("blinkCount", { n: active.blinkCount ?? 0 })}
+                    {tx("blinkProgress", { n: active.blinkCount ?? 0 })}
                   </span>
                 )}
               </div>
             </div>
-            <div className="mt-0.5 flex items-center gap-2.5">
-              {phase === "liveness" && active && (
-                <ChallengeDemo kind={active.kind} done={active.done} size={44} />
+
+            <div className="mt-1 flex items-center gap-3">
+              {/* DEMO LEFT OF MESSAGE */}
+              {showDemo && active && (
+                <ChallengeDemo kind={active.kind} done={active.done} size={56} />
               )}
+              {!showDemo && (captureSeq === "success" || captureSeq === "capturing") && (
+                <div
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/40"
+                  style={{ width: 56, height: 56 }}
+                  aria-hidden="true"
+                >
+                  <CheckCircle2 className="h-7 w-7" />
+                </div>
+              )}
+              {!showDemo && (captureSeq === "lookStraight" || captureSeq === "countdown") && (
+                <div
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-white/10 text-white ring-1 ring-white/20"
+                  style={{ width: 56, height: 56 }}
+                  aria-hidden="true"
+                >
+                  {captureSeq === "countdown" && countdown !== null ? (
+                    <span className="text-2xl font-bold tabular-nums">{countdown}</span>
+                  ) : (
+                    <Camera className="h-7 w-7" />
+                  )}
+                </div>
+              )}
+
               <div className="min-w-0 flex-1">
-                <p className="truncate text-base font-semibold leading-tight text-white sm:text-lg">
+                <p className="text-base font-semibold leading-tight text-white sm:text-lg">
                   {instruction}
                 </p>
-                {phase === "liveness" && meterLine && active?.kind !== "blink" && (
-                  <p className="text-[11px] text-white/70">{meterLine}</p>
+                {meterLine && (
+                  <p className="mt-0.5 text-[11px] text-white/70">{meterLine}</p>
                 )}
-                {phase === "liveness" && (
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/15">
+                {phase === "liveness" && !inCapture && (
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/15">
                     <div
                       className="h-full bg-emerald-400 transition-[width] duration-100"
                       style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
@@ -966,9 +1067,20 @@ function LivenessScreen({
                   </div>
                 )}
               </div>
+
+              {/* Big countdown number on the right of the message */}
+              {captureSeq === "countdown" && countdown !== null && (
+                <div
+                  key={`big-${countdown}`}
+                  className="shrink-0 text-5xl font-black tabular-nums text-emerald-300 animate-in zoom-in-95 duration-200"
+                >
+                  {countdown}
+                </div>
+              )}
             </div>
+
             <p
-              className={`mt-1 text-xs ${
+              className={`mt-2 text-xs ${
                 centered ? "text-emerald-200/90" : "text-amber-200/90"
               }`}
             >
@@ -978,86 +1090,117 @@ function LivenessScreen({
               <p className="mt-1 text-[11px] text-amber-200/90">{hintText}</p>
             )}
 
+            {/* Step dots inside band (clearer on desktop) */}
+            {phase === "liveness" && challenges.length > 0 && (
+              <div className="mt-3 flex items-center gap-1.5">
+                {challenges.map((c, i) => (
+                  <span
+                    key={i}
+                    className={`h-1.5 rounded-full transition-all ${
+                      c.done
+                        ? "w-6 bg-emerald-400"
+                        : i === activeIdx && !inCapture
+                          ? "w-6 bg-white/80"
+                          : "w-1.5 bg-white/30"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+
             {isDev && (
-              <p className="mt-1 text-[10px] text-white/50">FPS: {fps}</p>
+              <p className="mt-2 text-[10px] text-white/40">
+                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw.toFixed(2)} · pitch {liveReadout.pitch.toFixed(2)}
+              </p>
+            )}
+          </div>
+
+          {isDev && devOpen && (
+            <div className="mt-3">
+              <DevPanel />
+            </div>
+          )}
+        </div>
+
+        {/* CAMERA CARD (right on desktop, below on mobile) */}
+        <div className="order-2 lg:order-2 lg:justify-self-end w-full">
+          <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
+            />
+            <canvas
+              ref={overlayRef}
+              width={400}
+              height={533}
+              className="absolute inset-0 h-full w-full"
+            />
+            <canvas ref={sampleRef} className="hidden" />
+
+            {/* Blink flash tick */}
+            {phase === "liveness" && !inCapture && active?.kind === "blink" && (
+              <div
+                key={`tick-${blinkTick}`}
+                className="pointer-events-none absolute inset-0 bg-emerald-400/20 opacity-0 animate-in fade-in zoom-in-95"
+                style={{
+                  animationDuration: "180ms",
+                  animationDirection: "alternate",
+                  animationIterationCount: 2,
+                }}
+              />
+            )}
+
+            <div
+              className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
+                flash ? "opacity-70" : "opacity-0"
+              }`}
+            />
+
+            {/* Big countdown ALSO over the camera so users looking at the lens see it */}
+            {captureSeq === "countdown" && countdown !== null && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div
+                  key={`cam-cd-${countdown}`}
+                  className="rounded-full bg-black/60 px-8 py-5 text-6xl font-black text-white backdrop-blur-sm animate-in zoom-in-90 duration-200"
+                >
+                  {countdown}
+                </div>
+              </div>
+            )}
+
+            {/* Paused overlay */}
+            {paused && !inSoft && phase === "liveness" && !inCapture && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-3 rounded-2xl bg-zinc-900/80 px-6 py-5 ring-1 ring-white/10">
+                  <Pause className="h-6 w-6 text-white" />
+                  <p className="text-sm text-white/80">{tx("paused")}</p>
+                  <Button onClick={onTogglePause} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
+                    <Play className="mr-2 h-4 w-4" />
+                    {tx("resumeBtn")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Soft-timeout overlay (per-challenge retry) */}
+            {inSoft && phase === "liveness" && !inCapture && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+                <div className="w-full max-w-xs space-y-3 rounded-2xl bg-zinc-900/90 px-5 py-5 text-center ring-1 ring-white/10">
+                  <p className="text-sm font-semibold text-white">{tx("timeoutSoft")}</p>
+                  <p className="text-[11px] text-white/60">{tx("attempt", { n: attempts })}</p>
+                  {hintText && <p className="text-xs text-amber-200/90">{hintText}</p>}
+                  <Button onClick={onTryAgain} className="w-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
+                    {tx("tryAgain")}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>
-
-        {/* Blink flash tick */}
-        {phase === "liveness" && active?.kind === "blink" && (
-          <div
-            key={`tick-${blinkTick}`}
-            className="pointer-events-none absolute inset-0 bg-emerald-400/20 opacity-0 animate-in fade-in zoom-in-95"
-            style={{
-              animationDuration: "180ms",
-              animationDirection: "alternate",
-              animationIterationCount: 2,
-            }}
-          />
-        )}
-
-        <div
-          className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
-            flash ? "opacity-70" : "opacity-0"
-          }`}
-        />
-        {countdown !== null && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="rounded-full bg-black/60 px-6 py-4 text-5xl font-bold text-white backdrop-blur-sm">
-              {countdown}
-            </div>
-          </div>
-        )}
-
-        {/* Paused overlay */}
-        {paused && !inSoft && phase === "liveness" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-3 rounded-2xl bg-zinc-900/80 px-6 py-5 ring-1 ring-white/10">
-              <Pause className="h-6 w-6 text-white" />
-              <p className="text-sm text-white/80">{tx("paused")}</p>
-              <Button onClick={onTogglePause} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
-                <Play className="mr-2 h-4 w-4" />
-                {tx("resumeBtn")}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Soft-timeout overlay (per-challenge retry) */}
-        {inSoft && phase === "liveness" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <div className="w-full max-w-xs space-y-3 rounded-2xl bg-zinc-900/90 px-5 py-5 text-center ring-1 ring-white/10">
-              <p className="text-sm font-semibold text-white">{tx("timeoutSoft")}</p>
-              <p className="text-[11px] text-white/60">{tx("attempt", { n: attempts })}</p>
-              {hintText && <p className="text-xs text-amber-200/90">{hintText}</p>}
-              <Button onClick={onTryAgain} className="w-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
-                {tx("tryAgain")}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom: progress dots */}
-        {phase === "liveness" && (
-          <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 p-3">
-            {challenges.map((c, i) => (
-              <span
-                key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  c.done
-                    ? "w-5 bg-emerald-400"
-                    : i === activeIdx
-                      ? "w-5 bg-white/80"
-                      : "w-1.5 bg-white/30"
-                }`}
-              />
-            ))}
-          </div>
-        )}
       </div>
-
-      {isDev && devOpen && <DevPanel />}
     </section>
   );
 }
@@ -1086,13 +1229,17 @@ function DevPanel() {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 space-y-1.5">
       <p className="text-xs font-semibold text-zinc-200">Dev tuning</p>
-      <Slider k="BLINK_HIGH_OFFSET" min={0.15} max={0.6} step={0.01} />
-      <Slider k="BLINK_LOW_OFFSET" min={0.05} max={0.3} step={0.01} />
-      <Slider k="BLINK_REFRACTORY_MS" min={100} max={600} step={10} />
-      <Slider k="SMILE_HOLD_MS" min={100} max={600} step={10} />
-      <Slider k="SMILE_DELTA" min={0.05} max={0.4} step={0.01} />
-      <Slider k="YAW_TURN" min={0.15} max={0.7} step={0.01} />
-      <Slider k="PITCH_NOD" min={0.15} max={0.6} step={0.01} />
+      <Slider k="BLINK_ABS" min={0.2} max={0.7} step={0.01} />
+      <Slider k="BLINK_HIGH_OFFSET" min={0.10} max={0.6} step={0.01} />
+      <Slider k="BLINK_LOW_OFFSET" min={0.03} max={0.3} step={0.01} />
+      <Slider k="BLINK_REFRACTORY_MS" min={80} max={600} step={10} />
+      <Slider k="SMILE_ABS" min={0.15} max={0.6} step={0.01} />
+      <Slider k="SMILE_HOLD_MS" min={80} max={600} step={10} />
+      <Slider k="SMILE_DELTA" min={0.04} max={0.4} step={0.01} />
+      <Slider k="YAW_TURN_ABS" min={0.08} max={0.5} step={0.01} />
+      <Slider k="NOSE_TURN_ABS" min={0.06} max={0.4} step={0.01} />
+      <Slider k="PITCH_NOD_ABS" min={0.08} max={0.5} step={0.01} />
+      <Slider k="NOSE_NOD_ABS" min={0.04} max={0.3} step={0.01} />
       <Slider k="DEPTH_MIN_RATIO" min={0.2} max={0.9} step={0.05} />
     </div>
   );
