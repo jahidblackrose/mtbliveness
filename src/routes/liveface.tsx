@@ -138,6 +138,11 @@ function LiveFaceAI() {
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
 
   const currentTimeoutMs = easyMode ? EASY_CHALLENGE_TIMEOUT_MS : CHALLENGE_TIMEOUT_MS;
+  const currentTimeoutRef = useRef(CHALLENGE_TIMEOUT_MS);
+  useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
+
+  const hintKeyFor = (k: ChallengeKind) =>
+    k === "blink" ? "hintBlink" : k === "smile" ? "hintSmile" : k === "nod" ? "hintNod" : "hintTurn";
 
   useEffect(() => {
     stepRef.current = step;
