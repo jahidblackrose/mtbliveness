@@ -411,7 +411,20 @@ function LiveFaceAI() {
 
       const g = frameGuidance(faces, m, brightness);
       setCentered(g.ok);
+      lastFramingOkRef.current = g.ok;
       setSmoothGuidance(t(GUIDANCE_KEY[g.key], langRef.current), ts);
+
+      // Throttled dev readout (5Hz)
+      readoutAccumRef.current += dt;
+      if (m && readoutAccumRef.current > 200) {
+        readoutAccumRef.current = 0;
+        setLiveReadout({
+          blink: m.blinkMax,
+          smile: m.smileMax,
+          yaw: m.yaw,
+          pitch: m.pitch,
+        });
+      }
 
       captureBufRef.current.push({ ts, brightness, centered: g.ok });
       if (captureBufRef.current.length > CAPTURE_BUFFER) captureBufRef.current.shift();
@@ -492,31 +505,66 @@ function LiveFaceAI() {
           ts >= breatherUntilRef.current;
 
 
-        if (canRun && idx === -1) {
-          if (!captureScheduled) {
-            captureScheduled = true;
-            let n = 2;
-            setCountdown(n);
-            const iv = window.setInterval(() => {
-              n -= 1;
-              if (n <= 0) {
-                window.clearInterval(iv);
-                setCountdown(null);
-                setFlash(true);
-                setTimeout(() => setFlash(false), 200);
-                const recentOk = captureBufRef.current.filter((s) => s.centered).length;
-                if (recentOk >= 3 && stepRef.current === "liveness") capture();
-                else {
-                  captureScheduled = false;
-                  framingHoldStartRef.current = null;
-                  setStep("framing");
-                }
-              } else {
-                setCountdown(n);
+        if (idx === -1) {
+          // ALL CHALLENGES PASSED — explicit capture sequence:
+          // success (brief celebration) → lookStraight (hold) → 3-2-1 → capture
+          const seq = captureSeqRef.current;
+          if (seq === "idle") {
+            captureSeqRef.current = "success";
+            setCaptureSeq("success");
+            window.setTimeout(() => {
+              if (stepRef.current !== "liveness") return;
+              if (captureSeqRef.current !== "success") return;
+              captureSeqRef.current = "lookStraight";
+              setCaptureSeq("lookStraight");
+              lookStraightHoldRef.current = null;
+            }, 900);
+          } else if (seq === "lookStraight") {
+            const frontal =
+              !!m && g.ok && Math.abs(m.yaw) < 0.18 && Math.abs(m.pitch) < 0.18;
+            if (frontal) {
+              if (lookStraightHoldRef.current == null) lookStraightHoldRef.current = ts;
+              if (ts - lookStraightHoldRef.current >= 500) {
+                captureSeqRef.current = "countdown";
+                setCaptureSeq("countdown");
+                let n = 3;
+                setBigCountdown(n);
+                const iv = window.setInterval(() => {
+                  if (captureSeqRef.current !== "countdown") {
+                    window.clearInterval(iv);
+                    captureIntervalRef.current = null;
+                    return;
+                  }
+                  if (!lastFramingOkRef.current) {
+                    window.clearInterval(iv);
+                    captureIntervalRef.current = null;
+                    setBigCountdown(null);
+                    captureSeqRef.current = "lookStraight";
+                    setCaptureSeq("lookStraight");
+                    lookStraightHoldRef.current = null;
+                    return;
+                  }
+                  n -= 1;
+                  if (n <= 0) {
+                    window.clearInterval(iv);
+                    captureIntervalRef.current = null;
+                    setBigCountdown(null);
+                    captureSeqRef.current = "capturing";
+                    setCaptureSeq("capturing");
+                    setFlash(true);
+                    setTimeout(() => setFlash(false), 200);
+                    if (stepRef.current === "liveness") capture();
+                  } else {
+                    setBigCountdown(n);
+                  }
+                }, 1000);
+                captureIntervalRef.current = iv;
               }
-            }, 1000);
+            } else {
+              lookStraightHoldRef.current = null;
+            }
           }
-        } else if (canRun && idx !== -1 && m && baseline) {
+        } else if (canRun && m && baseline) {
           const sinceShown = ts - challengePromptedAtRef.current;
           if (sinceShown >= PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
