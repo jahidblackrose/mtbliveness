@@ -568,6 +568,9 @@ function LiveFaceAI() {
     },
     [startRecorder],
   );
+  useEffect(() => {
+    integrityRestartRef.current = integrityRestart;
+  }, [integrityRestart]);
 
 
   useEffect(() => {
