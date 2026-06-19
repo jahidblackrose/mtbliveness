@@ -9,14 +9,20 @@ import { Camera, CheckCircle2, RotateCcw, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   CHALLENGE_LABEL,
-  type ChallengeKind,
   type ChallengeState,
+  type Baseline,
+  type FaceMetrics,
+  type CalibAccumulator,
   computeMetrics,
   frameGuidance,
   newChallengeState,
   pickChallenges,
   updateChallenge,
   avgBrightness,
+  accumulate,
+  finalizeBaseline,
+  emptyAccumulator,
+  SpoofGuard,
 } from "@/lib/liveness";
 
 export const Route = createFileRoute("/liveface")({
@@ -27,15 +33,28 @@ export const Route = createFileRoute("/liveface")({
       {
         name: "description",
         content:
-          "On-device face liveness detection. Nothing is uploaded — your photo never leaves the browser.",
+          "On-device active face liveness. Nothing is uploaded — your photo never leaves the browser.",
       },
     ],
   }),
   component: LiveFaceAI,
 });
 
-type Step = "start" | "loading" | "liveness" | "result" | "error";
-const CHALLENGE_TIMEOUT_MS = 12_000;
+type Step = "start" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error";
+
+const CHALLENGE_TIMEOUT_MS = 6_000;
+const CHALLENGE_BREATHER_MS = 400;
+const FRAMING_HOLD_MS = 500;
+const CALIBRATION_MS = 1500;
+const PROMPT_REACTION_MIN_MS = 250;
+const CAPTURE_BUFFER = 5;
+
+type FrameSample = {
+  ts: number;
+  faces: number;
+  m: FaceMetrics | null;
+  brightness: number;
+};
 
 function LiveFaceAI() {
   const [step, setStep] = useState<Step>("start");
@@ -53,11 +72,42 @@ function LiveFaceAI() {
   const [challengeView, setChallengeView] = useState<ChallengeState[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [guidance, setGuidance] = useState("Hold still");
+  const lastGuidanceChangeRef = useRef<number>(0);
+  const guidanceDraftRef = useRef<string>("");
   const [centered, setCentered] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const challengeStartRef = useRef<number>(0);
   const [timeLeft, setTimeLeft] = useState<number>(CHALLENGE_TIMEOUT_MS);
   const [flash, setFlash] = useState(false);
+  const stepRef = useRef<Step>("start");
+
+  // Framing gate state
+  const framingHoldStartRef = useRef<number | null>(null);
+
+  // Calibration state
+  const calibAccRef = useRef<CalibAccumulator>(emptyAccumulator());
+  const calibStartRef = useRef<number>(0);
+  const baselineRef = useRef<Baseline | null>(null);
+  const [calibProgress, setCalibProgress] = useState(0);
+
+  // Challenge transition state
+  const challengeStartRef = useRef<number>(0);
+  const challengePromptedAtRef = useRef<number>(0);
+  const breatherUntilRef = useRef<number>(0);
+
+  // Live meters
+  const [blinkMeter, setBlinkMeter] = useState(0);
+  const [smileMeter, setSmileMeter] = useState(0);
+  const [poseMeter, setPoseMeter] = useState(0);
+
+  // Capture buffer
+  const captureBufRef = useRef<{ ts: number; brightness: number; centered: boolean }[]>([]);
+
+  // Anti-spoof
+  const spoofRef = useRef<SpoofGuard>(new SpoofGuard());
+
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
 
   const stopAll = useCallback(() => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
@@ -67,9 +117,12 @@ function LiveFaceAI() {
   }, []);
 
   useEffect(() => () => stopAll(), [stopAll]);
-  useEffect(() => () => {
-    if (photoUrl) URL.revokeObjectURL(photoUrl);
-  }, [photoUrl]);
+  useEffect(
+    () => () => {
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
+    },
+    [photoUrl],
+  );
 
   const fail = useCallback(
     (msg: string) => {
@@ -106,11 +159,28 @@ function LiveFaceAI() {
     );
   }, [fail, stopAll]);
 
+  const setSmoothGuidance = (text: string, now: number) => {
+    if (text === guidanceDraftRef.current) return;
+    guidanceDraftRef.current = text;
+    if (now - lastGuidanceChangeRef.current > 300) {
+      setGuidance(text);
+      lastGuidanceChangeRef.current = now;
+    } else {
+      // schedule short debounce
+      const target = text;
+      window.setTimeout(() => {
+        if (guidanceDraftRef.current === target) {
+          setGuidance(target);
+          lastGuidanceChangeRef.current = performance.now();
+        }
+      }, 320);
+    }
+  };
+
   const start = useCallback(async () => {
     setErrorMsg("");
     setStep("loading");
     try {
-      // Load MediaPipe.
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm",
       );
@@ -122,6 +192,8 @@ function LiveFaceAI() {
         },
         runningMode: "VIDEO",
         numFaces: 2,
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
       });
       landmarkerRef.current = landmarker;
 
@@ -131,14 +203,17 @@ function LiveFaceAI() {
       });
       streamRef.current = stream;
 
-      const chosen = pickChallenges();
-      const initial = chosen.map(newChallengeState);
-      challengesRef.current = initial;
-      setChallengeView(initial);
+      // Reset state
+      challengesRef.current = [];
+      setChallengeView([]);
       setActiveIdx(0);
-      challengeStartRef.current = performance.now();
-      setTimeLeft(CHALLENGE_TIMEOUT_MS);
-      setStep("liveness");
+      framingHoldStartRef.current = null;
+      calibAccRef.current = emptyAccumulator();
+      baselineRef.current = null;
+      setCalibProgress(0);
+      captureBufRef.current = [];
+      spoofRef.current = new SpoofGuard();
+      setStep("framing");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       if (/Permission|denied|NotAllowed/i.test(msg))
@@ -149,18 +224,34 @@ function LiveFaceAI() {
     }
   }, [fail]);
 
-  // Attach the stream once the video element is mounted in the liveness step.
+  // Attach the stream once the video element is mounted.
   useEffect(() => {
-    if (step !== "liveness") return;
+    if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     const v = videoRef.current;
     if (!v || !streamRef.current) return;
-    v.srcObject = streamRef.current;
-    v.play().catch(() => {});
+    if (v.srcObject !== streamRef.current) {
+      v.srcObject = streamRef.current;
+      v.play().catch(() => {});
+    }
   }, [step]);
 
-  // Detection loop.
+  const beginChallenges = useCallback(() => {
+    const chosen = pickChallenges();
+    const now = performance.now();
+    const initial = chosen.map((k) => newChallengeState(k, now));
+    challengesRef.current = initial;
+    setChallengeView(initial);
+    setActiveIdx(0);
+    challengeStartRef.current = now;
+    challengePromptedAtRef.current = now;
+    breatherUntilRef.current = 0;
+    setTimeLeft(CHALLENGE_TIMEOUT_MS);
+    setStep("liveness");
+  }, []);
+
+  // Main detection loop — single rAF across framing/calibration/liveness.
   useEffect(() => {
-    if (step !== "liveness") return;
+    if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     let lastTs = -1;
     let cancelled = false;
     let captureScheduled = false;
@@ -191,9 +282,16 @@ function LiveFaceAI() {
       }
 
       const faces = result.faceLandmarks?.length ?? 0;
-      const m = faces === 1 ? computeMetrics(result.faceLandmarks[0]) : null;
+      const m =
+        faces >= 1
+          ? computeMetrics(
+              result.faceLandmarks[0],
+              result.faceBlendshapes,
+              result.facialTransformationMatrixes?.[0],
+            )
+          : null;
 
-      // Brightness sample from a downscaled draw.
+      // Brightness sample
       const sctx = sample.getContext("2d");
       let brightness = 128;
       if (sctx) {
@@ -206,56 +304,152 @@ function LiveFaceAI() {
         brightness = avgBrightness(sctx, sample.width, sample.height);
       }
 
-      // Draw overlay (oval guide).
       drawOverlay(overlay, m, faces);
 
       const g = frameGuidance(faces, m, brightness);
       setCentered(g.ok);
-      setGuidance(g.text);
+      setSmoothGuidance(g.text, ts);
 
-      if (g.ok && m) {
-        const idx = challengesRef.current.findIndex((c) => !c.done);
-        if (idx === -1) {
-          if (!captureScheduled) {
-            captureScheduled = true;
-            let n = 2;
-            setCountdown(n);
-            const iv = window.setInterval(() => {
-              n -= 1;
-              if (n <= 0) {
-                window.clearInterval(iv);
-                setCountdown(null);
-                setFlash(true);
-                setTimeout(() => setFlash(false), 200);
-                // Quality gate: still one face & centered before snapping.
-                if (g.ok) capture();
-                else captureScheduled = false;
-              } else {
-                setCountdown(n);
-              }
-            }, 1000);
-          }
-        } else {
-          const updated = updateChallenge(challengesRef.current[idx], m);
-          const wasDone = challengesRef.current[idx].done;
-          challengesRef.current[idx] = updated;
-          if (updated.done && !wasDone) {
-            setChallengeView([...challengesRef.current]);
-            challengeStartRef.current = performance.now();
-            setActiveIdx(Math.min(idx + 1, challengesRef.current.length - 1));
-          }
-        }
+      // Track capture buffer for "cleanest of last 5 frames"
+      captureBufRef.current.push({ ts, brightness, centered: g.ok });
+      if (captureBufRef.current.length > CAPTURE_BUFFER) captureBufRef.current.shift();
+
+      const currentStep = stepRef.current;
+
+      // Abort if a second face appears mid-flow.
+      if ((currentStep === "calibrating" || currentStep === "liveness") && faces > 1) {
+        fail("Another face appeared. Please try again alone.");
+        return;
       }
 
-      // Timeout for the active challenge.
-      const activeIndex = challengesRef.current.findIndex((c) => !c.done);
-      if (activeIndex !== -1) {
-        const elapsed = performance.now() - challengeStartRef.current;
-        const remaining = Math.max(0, CHALLENGE_TIMEOUT_MS - elapsed);
-        setTimeLeft(remaining);
-        if (remaining === 0) {
-          fail("Challenge timed out. Please try again.");
-          return;
+      if (currentStep === "framing") {
+        if (g.ok && m) {
+          if (framingHoldStartRef.current == null) framingHoldStartRef.current = ts;
+          if (ts - framingHoldStartRef.current >= FRAMING_HOLD_MS) {
+            calibAccRef.current = emptyAccumulator();
+            calibStartRef.current = ts;
+            setStep("calibrating");
+          }
+        } else {
+          framingHoldStartRef.current = null;
+        }
+      } else if (currentStep === "calibrating") {
+        if (!g.ok || !m) {
+          // restart calibration if framing drops
+          calibAccRef.current = emptyAccumulator();
+          calibStartRef.current = ts;
+          setCalibProgress(0);
+          setStep("framing");
+        } else {
+          accumulate(calibAccRef.current, m);
+          const elapsed = ts - calibStartRef.current;
+          setCalibProgress(Math.min(1, elapsed / CALIBRATION_MS));
+          if (elapsed >= CALIBRATION_MS) {
+            baselineRef.current = finalizeBaseline(calibAccRef.current);
+            beginChallenges();
+          }
+        }
+      } else if (currentStep === "liveness") {
+        const baseline = baselineRef.current;
+        if (m && baseline) {
+          spoofRef.current.push(m.fingerprint, brightness);
+          const spoof = spoofRef.current.check(m, baseline);
+          if (spoof) {
+            fail(`${spoof}. Please retry with a real face.`);
+            return;
+          }
+        }
+
+        // Live meters from raw metrics (even before challenge updates).
+        if (m && baseline) {
+          setBlinkMeter(Math.max(0, Math.min(1, m.blinkAvg)));
+          setSmileMeter(
+            Math.max(0, Math.min(1, (m.smileAvg - baseline.smileNeutral) / 0.3)),
+          );
+        }
+
+        if (g.ok && m && baseline && ts >= breatherUntilRef.current) {
+          const idx = challengesRef.current.findIndex((c) => !c.done);
+          if (idx === -1) {
+            // All challenges complete → countdown then capture.
+            if (!captureScheduled) {
+              captureScheduled = true;
+              let n = 2;
+              setCountdown(n);
+              const iv = window.setInterval(() => {
+                n -= 1;
+                if (n <= 0) {
+                  window.clearInterval(iv);
+                  setCountdown(null);
+                  setFlash(true);
+                  setTimeout(() => setFlash(false), 200);
+                  // Re-verify single face & centered at capture.
+                  const recentOk = captureBufRef.current.filter((s) => s.centered).length;
+                  if (recentOk >= 3 && stepRef.current === "liveness") capture();
+                  else {
+                    captureScheduled = false;
+                    framingHoldStartRef.current = null;
+                    setStep("framing");
+                  }
+                } else {
+                  setCountdown(n);
+                }
+              }, 1000);
+            }
+          } else {
+            // Anti-replay: ignore actions before a human reaction delay.
+            const sinceShown = ts - challengePromptedAtRef.current;
+            if (sinceShown >= PROMPT_REACTION_MIN_MS) {
+              const updated = updateChallenge(
+                challengesRef.current[idx],
+                m,
+                baseline,
+                ts,
+              );
+              const wasDone = challengesRef.current[idx].done;
+              challengesRef.current[idx] = updated;
+              setPoseMeter(updated.poseProgress ?? 0);
+
+              if (updated.done && !wasDone) {
+                // For turn challenges, require parallax to confirm 3D.
+                if (
+                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
+                  updated.parallaxOk === false
+                ) {
+                  fail("Flat surface detected during head turn.");
+                  return;
+                }
+                setChallengeView([...challengesRef.current]);
+                const nextIdx = Math.min(idx + 1, challengesRef.current.length - 1);
+                breatherUntilRef.current = ts + CHALLENGE_BREATHER_MS;
+                window.setTimeout(() => {
+                  if (stepRef.current !== "liveness") return;
+                  setActiveIdx(nextIdx);
+                  challengeStartRef.current = performance.now();
+                  challengePromptedAtRef.current = performance.now();
+                  setTimeLeft(CHALLENGE_TIMEOUT_MS);
+                  setBlinkMeter(0);
+                  setSmileMeter(0);
+                  setPoseMeter(0);
+                }, CHALLENGE_BREATHER_MS);
+              } else {
+                // Update view so live counters (blinkCount, smileIntensity) render.
+                setChallengeView([...challengesRef.current]);
+              }
+            }
+          }
+        }
+
+        // Per-challenge timeout
+        const activeIndex = challengesRef.current.findIndex((c) => !c.done);
+        if (activeIndex !== -1 && ts >= breatherUntilRef.current) {
+          const elapsed = ts - challengeStartRef.current;
+          const remaining = Math.max(0, CHALLENGE_TIMEOUT_MS - elapsed);
+          setTimeLeft(remaining);
+          if (remaining === 0) {
+            fail("Challenge timed out. Please try again.");
+            return;
+          }
         }
       }
 
@@ -267,7 +461,8 @@ function LiveFaceAI() {
       cancelled = true;
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [step, capture, fail]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const retake = useCallback(() => {
     if (photoUrl) URL.revokeObjectURL(photoUrl);
@@ -293,8 +488,9 @@ function LiveFaceAI() {
 
         {step === "start" && <StartScreen onStart={start} />}
         {step === "loading" && <LoadingScreen />}
-        {step === "liveness" && (
+        {(step === "framing" || step === "calibrating" || step === "liveness") && (
           <LivenessScreen
+            phase={step}
             videoRef={videoRef}
             overlayRef={overlayRef}
             sampleRef={sampleCanvasRef}
@@ -305,6 +501,10 @@ function LiveFaceAI() {
             countdown={countdown}
             timeLeft={timeLeft}
             flash={flash}
+            calibProgress={calibProgress}
+            blinkMeter={blinkMeter}
+            smileMeter={smileMeter}
+            poseMeter={poseMeter}
             onCancel={reset}
           />
         )}
@@ -314,8 +514,8 @@ function LiveFaceAI() {
         {step === "error" && <ErrorScreen msg={errorMsg} onRetry={start} onHome={reset} />}
 
         <footer className="mt-auto pt-6 text-center text-[11px] text-zinc-500">
-          Demonstration liveness flow — browser-based 2D active liveness. Nothing is
-          uploaded.
+          Demonstration — browser-based liveness with monocular pseudo-depth. Not a
+          substitute for hardware 3D sensing.
         </footer>
       </div>
     </main>
@@ -324,14 +524,14 @@ function LiveFaceAI() {
 
 function StartScreen({ onStart }: { onStart: () => void }) {
   return (
-    <section className="space-y-6 pt-4">
+    <section className="space-y-6 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">
           Verify it's really you
         </h2>
         <p className="mt-2 text-sm text-zinc-400">
-          We'll run a quick liveness check using your camera. Your photo and video
-          never leave this device.
+          A quick liveness check using your camera. Your photo and video never leave
+          this device.
         </p>
       </div>
       <ol className="space-y-3 text-sm">
@@ -371,6 +571,7 @@ function LoadingScreen() {
 }
 
 function LivenessScreen({
+  phase,
   videoRef,
   overlayRef,
   sampleRef,
@@ -381,8 +582,13 @@ function LivenessScreen({
   countdown,
   timeLeft,
   flash,
+  calibProgress,
+  blinkMeter,
+  smileMeter,
+  poseMeter,
   onCancel,
 }: {
+  phase: "framing" | "calibrating" | "liveness";
   videoRef: React.RefObject<HTMLVideoElement | null>;
   overlayRef: React.RefObject<HTMLCanvasElement | null>;
   sampleRef: React.RefObject<HTMLCanvasElement | null>;
@@ -393,19 +599,32 @@ function LivenessScreen({
   countdown: number | null;
   timeLeft: number;
   flash: boolean;
+  calibProgress: number;
+  blinkMeter: number;
+  smileMeter: number;
+  poseMeter: number;
   onCancel: () => void;
 }) {
   const active = challenges[activeIdx];
-  const instruction = active ? CHALLENGE_LABEL[active.kind] : "All set!";
-  const stepNum = Math.min(activeIdx + 1, challenges.length);
+  const totalSteps = challenges.length || 3;
+  const stepNum = phase === "liveness" ? Math.min(activeIdx + 1, totalSteps) : 0;
   const timePct = Math.max(0, Math.min(100, (timeLeft / CHALLENGE_TIMEOUT_MS) * 100));
+
+  let headerLabel = "";
+  if (phase === "framing") headerLabel = "Framing";
+  else if (phase === "calibrating") headerLabel = "Calibrating";
+  else headerLabel = `Step ${stepNum} of ${totalSteps}`;
+
+  let instruction = "";
+  if (phase === "framing") instruction = "Get into frame";
+  else if (phase === "calibrating") instruction = "Hold still…";
+  else if (active) instruction = CHALLENGE_LABEL[active.kind];
+  else instruction = "All set!";
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between text-xs text-zinc-400">
-        <span>
-          Step {stepNum} of {challenges.length}
-        </span>
+        <span>{headerLabel}</span>
         <button
           onClick={onCancel}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
@@ -442,17 +661,29 @@ function LivenessScreen({
             </div>
           </div>
         )}
-        <div className="absolute inset-x-0 top-0 p-3">
-          <div className="h-1 overflow-hidden rounded-full bg-zinc-700/60">
-            <div
-              className="h-full bg-emerald-400 transition-[width] duration-100"
-              style={{ width: `${timePct}%` }}
-            />
+        {phase === "liveness" && (
+          <div className="absolute inset-x-0 top-0 p-3">
+            <div className="h-1 overflow-hidden rounded-full bg-zinc-700/60">
+              <div
+                className="h-full bg-emerald-400 transition-[width] duration-100"
+                style={{ width: `${timePct}%` }}
+              />
+            </div>
           </div>
-        </div>
+        )}
+        {phase === "calibrating" && (
+          <div className="absolute inset-x-0 top-0 p-3">
+            <div className="h-1 overflow-hidden rounded-full bg-zinc-700/60">
+              <div
+                className="h-full bg-sky-400 transition-[width] duration-100"
+                style={{ width: `${calibProgress * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
         <div className="absolute inset-x-0 bottom-0 p-4 text-center">
           <p
-            className={`mx-auto inline-block rounded-full px-3 py-1.5 text-xs font-medium backdrop-blur-sm ${
+            className={`mx-auto inline-block rounded-full px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors ${
               centered
                 ? "bg-emerald-500/20 text-emerald-200"
                 : "bg-amber-500/20 text-amber-200"
@@ -464,42 +695,96 @@ function LivenessScreen({
       </div>
 
       <div
-        key={activeIdx}
+        key={`${phase}-${activeIdx}`}
         className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-center animate-in fade-in slide-in-from-bottom-2 duration-300"
       >
         <p className="text-xs uppercase tracking-wider text-zinc-500">
-          Challenge
+          {phase === "liveness" ? "Challenge" : phase}
         </p>
         <p className="mt-1 text-xl font-semibold">{instruction}</p>
-        {active?.kind === "blink" && (
-          <p className="mt-1 text-xs text-zinc-400">
-            Blinks detected: {active.blinkCount ?? 0} / 2
-          </p>
+
+        {phase === "liveness" && active?.kind === "blink" && (
+          <div className="mt-3 space-y-1.5">
+            <p className="text-xs text-zinc-400">
+              Blinks detected: {active.blinkCount ?? 0} / 2
+            </p>
+            <Meter value={blinkMeter} color="bg-emerald-400" label="Eye closure" />
+          </div>
         )}
+        {phase === "liveness" && active?.kind === "smile" && (
+          <div className="mt-3 space-y-1.5">
+            <p className="text-xs text-zinc-400">
+              {(active.smileHoldStart ?? 0) > 0 ? "Keep smiling…" : "Show a smile"}
+            </p>
+            <Meter
+              value={Math.max(smileMeter, active.smileIntensity ?? 0)}
+              color="bg-emerald-400"
+              label="Smile"
+            />
+          </div>
+        )}
+        {phase === "liveness" &&
+          (active?.kind === "turnLeft" ||
+            active?.kind === "turnRight" ||
+            active?.kind === "nod") && (
+            <div className="mt-3 space-y-1.5">
+              <p className="text-xs text-zinc-400">Slow and steady</p>
+              <Meter
+                value={Math.max(poseMeter, active.poseProgress ?? 0)}
+                color="bg-emerald-400"
+                label="Movement"
+              />
+            </div>
+          )}
       </div>
 
-      <ul className="flex items-center justify-center gap-3" aria-label="Progress">
-        {challenges.map((c, i) => (
-          <li
-            key={i}
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
-              c.done
-                ? "bg-emerald-500/15 text-emerald-300"
-                : i === activeIdx
-                  ? "bg-zinc-800 text-zinc-200"
-                  : "bg-zinc-900 text-zinc-500"
-            }`}
-          >
-            {c.done ? (
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <span className="h-3.5 w-3.5 rounded-full border border-current" />
-            )}
-            {CHALLENGE_LABEL[c.kind].split(" ")[0]}
-          </li>
-        ))}
-      </ul>
+      {phase === "liveness" && (
+        <ul className="flex items-center justify-center gap-3" aria-label="Progress">
+          {challenges.map((c, i) => (
+            <li
+              key={i}
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors ${
+                c.done
+                  ? "bg-emerald-500/15 text-emerald-300"
+                  : i === activeIdx
+                    ? "bg-zinc-800 text-zinc-200"
+                    : "bg-zinc-900 text-zinc-500"
+              }`}
+            >
+              {c.done ? (
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <span className="h-3.5 w-3.5 rounded-full border border-current" />
+              )}
+              {CHALLENGE_LABEL[c.kind].split(" ")[0]}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
+  );
+}
+
+function Meter({
+  value,
+  color,
+  label,
+}: {
+  value: number;
+  color: string;
+  label: string;
+}) {
+  const pct = Math.max(0, Math.min(100, value * 100));
+  return (
+    <div>
+      <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+        <div
+          className={`h-full ${color} transition-[width] duration-100`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="sr-only">{label}</span>
+    </div>
   );
 }
 
@@ -559,7 +844,7 @@ function ErrorScreen({
   onHome: () => void;
 }) {
   return (
-    <section className="space-y-4 pt-6 text-center">
+    <section className="space-y-4 pt-6 text-center animate-in fade-in duration-300">
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-500/15 text-red-400">
         <X className="h-6 w-6" aria-hidden="true" />
       </div>
@@ -588,7 +873,7 @@ function ErrorScreen({
 
 function drawOverlay(
   canvas: HTMLCanvasElement,
-  m: ReturnType<typeof computeMetrics> | null,
+  m: FaceMetrics | null,
   faces: number,
 ) {
   const ctx = canvas.getContext("2d");
@@ -597,7 +882,6 @@ function drawOverlay(
   const H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  // Dim outside the oval.
   const cx = W / 2;
   const cy = H / 2;
   const rx = W * 0.36;
@@ -612,7 +896,6 @@ function drawOverlay(
   ctx.fill();
   ctx.restore();
 
-  // Oval ring.
   const ok = faces === 1 && m && m.centerOffset < 0.18;
   ctx.strokeStyle = ok ? "rgba(52,211,153,0.95)" : "rgba(244,191,79,0.9)";
   ctx.lineWidth = 3;
@@ -620,6 +903,3 @@ function drawOverlay(
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.stroke();
 }
-
-const CHALLENGE_TIMEOUT_MS_EXPORT = CHALLENGE_TIMEOUT_MS;
-export { CHALLENGE_TIMEOUT_MS_EXPORT };
