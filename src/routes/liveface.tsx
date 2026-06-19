@@ -639,16 +639,18 @@ function LiveFaceAI() {
               captureSeqRef.current = "lookStraight";
               setCaptureSeq("lookStraight");
               lookStraightHoldRef.current = null;
-            }, 900);
+            }, CONFIG.SUCCESS_HOLD_MS);
           } else if (seq === "lookStraight") {
             const frontal =
-              !!m && g.ok && Math.abs(m.yaw) < 0.18 && Math.abs(m.pitch) < 0.18;
+              !!m && g.ok &&
+              Math.abs(m.yaw) < CONFIG.LOOK_STRAIGHT_YAW_MAX &&
+              Math.abs(m.pitch) < CONFIG.LOOK_STRAIGHT_PITCH_MAX;
             if (frontal) {
               if (lookStraightHoldRef.current == null) lookStraightHoldRef.current = ts;
-              if (ts - lookStraightHoldRef.current >= 500) {
+              if (ts - lookStraightHoldRef.current >= CONFIG.LOOK_STRAIGHT_HOLD_MS) {
                 captureSeqRef.current = "countdown";
                 setCaptureSeq("countdown");
-                let n = 3;
+                let n = CONFIG.COUNTDOWN_START;
                 setBigCountdown(n);
                 const iv = window.setInterval(() => {
                   if (captureSeqRef.current !== "countdown") {
@@ -673,13 +675,14 @@ function LiveFaceAI() {
                     captureSeqRef.current = "capturing";
                     setCaptureSeq("capturing");
                     setFlash(true);
-                    setTimeout(() => setFlash(false), 200);
+                    setTimeout(() => setFlash(false), CONFIG.FLASH_MS);
                     if (stepRef.current === "liveness") capture();
                   } else {
                     setBigCountdown(n);
                   }
-                }, 1000);
+                }, CONFIG.COUNTDOWN_INTERVAL_MS);
                 captureIntervalRef.current = iv;
+
               }
             } else {
               lookStraightHoldRef.current = null;
