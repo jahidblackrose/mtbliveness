@@ -392,6 +392,7 @@ function LiveFaceAI() {
       attemptsRef.current = [];
       setEasyModeState(false);
       setEasyMode(false);
+      resetDirectionCalibration();
       setPaused(false);
       setSoftTimeoutIdx(null);
       setHintText("");
