@@ -33,6 +33,7 @@ import {
   type Lang,
   t,
 } from "@/lib/liveness-i18n";
+import { ChallengeDemo } from "@/components/challenge-demo";
 
 export const Route = createFileRoute("/liveface")({
   ssr: false,
