@@ -631,16 +631,29 @@ function LiveFaceAI() {
             centered={centered}
             countdown={countdown}
             timeLeft={timeLeft}
+            timeoutMs={currentTimeoutMs}
             flash={flash}
             blinkTick={blinkTick}
             calibProgress={calibProgress}
             blinkMeter={blinkMeter}
             smileMeter={smileMeter}
             poseMeter={poseMeter}
+            paused={paused}
+            onTogglePause={togglePause}
+            softTimeoutIdx={softTimeoutIdx}
+            onTryAgain={tryAgainCurrent}
+            attempts={softTimeoutIdx != null ? attemptsRef.current[softTimeoutIdx] ?? 0 : 0}
+            hintText={hintText}
+            easyMode={easyMode}
+            fps={fps}
+            isDev={isDev}
+            devOpen={devOpen}
+            onToggleDev={() => setDevOpen((v) => !v)}
             onCancel={reset}
             tx={tx}
           />
         )}
+
         {step === "result" && photoUrl && (
           <ResultScreen photoUrl={photoUrl} onRetake={retake} onConfirm={reset} tx={tx} />
         )}
