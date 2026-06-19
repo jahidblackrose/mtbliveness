@@ -418,7 +418,7 @@ function LiveFaceAI() {
       else if (/NotFound|no.*camera/i.test(msg)) fail(t("noCamera", L));
       else fail(msg);
     }
-  }, [fail]);
+  }, [fail, startRecorder, videoUrl]);
 
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
