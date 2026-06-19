@@ -270,6 +270,14 @@ function LiveFaceAI() {
       setPaused(false);
       setSoftTimeoutIdx(null);
       setHintText("");
+      setCaptureSeq("idle");
+      captureSeqRef.current = "idle";
+      setBigCountdown(null);
+      lookStraightHoldRef.current = null;
+      if (captureIntervalRef.current != null) {
+        window.clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
       challengeRunningMsRef.current = 0;
       sessionStartRef.current = performance.now();
       setStep("framing");
