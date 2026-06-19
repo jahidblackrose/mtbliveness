@@ -130,6 +130,9 @@ function LiveFaceAI() {
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const sessionMetaRef = useRef<{ sessionId: string; startedAt: number } | null>(null);
+  type SubmitState = "idle" | "uploading" | "ok" | "fail";
+  const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [submitError, setSubmitError] = useState<string>("");
 
   const framingHoldStartRef = useRef<number | null>(null);
 
