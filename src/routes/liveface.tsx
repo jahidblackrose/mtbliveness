@@ -694,7 +694,7 @@ function LiveFaceAI() {
             : "'Inter', system-ui, sans-serif",
       }}
     >
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
+      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6 lg:max-w-5xl lg:px-6">
         <header className="flex items-center justify-between gap-2 pb-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
@@ -1229,13 +1229,17 @@ function DevPanel() {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 space-y-1.5">
       <p className="text-xs font-semibold text-zinc-200">Dev tuning</p>
-      <Slider k="BLINK_HIGH_OFFSET" min={0.15} max={0.6} step={0.01} />
-      <Slider k="BLINK_LOW_OFFSET" min={0.05} max={0.3} step={0.01} />
-      <Slider k="BLINK_REFRACTORY_MS" min={100} max={600} step={10} />
-      <Slider k="SMILE_HOLD_MS" min={100} max={600} step={10} />
-      <Slider k="SMILE_DELTA" min={0.05} max={0.4} step={0.01} />
-      <Slider k="YAW_TURN" min={0.15} max={0.7} step={0.01} />
-      <Slider k="PITCH_NOD" min={0.15} max={0.6} step={0.01} />
+      <Slider k="BLINK_ABS" min={0.2} max={0.7} step={0.01} />
+      <Slider k="BLINK_HIGH_OFFSET" min={0.10} max={0.6} step={0.01} />
+      <Slider k="BLINK_LOW_OFFSET" min={0.03} max={0.3} step={0.01} />
+      <Slider k="BLINK_REFRACTORY_MS" min={80} max={600} step={10} />
+      <Slider k="SMILE_ABS" min={0.15} max={0.6} step={0.01} />
+      <Slider k="SMILE_HOLD_MS" min={80} max={600} step={10} />
+      <Slider k="SMILE_DELTA" min={0.04} max={0.4} step={0.01} />
+      <Slider k="YAW_TURN_ABS" min={0.08} max={0.5} step={0.01} />
+      <Slider k="NOSE_TURN_ABS" min={0.06} max={0.4} step={0.01} />
+      <Slider k="PITCH_NOD_ABS" min={0.08} max={0.5} step={0.01} />
+      <Slider k="NOSE_NOD_ABS" min={0.04} max={0.3} step={0.01} />
       <Slider k="DEPTH_MIN_RATIO" min={0.2} max={0.9} step={0.05} />
     </div>
   );
