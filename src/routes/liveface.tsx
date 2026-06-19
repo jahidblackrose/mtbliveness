@@ -25,6 +25,8 @@ import {
   setEasyMode,
   EASY,
   TH,
+  DIRECTION,
+  resetDirectionCalibration,
   SpoofGuard,
 } from "@/lib/liveness";
 import {
