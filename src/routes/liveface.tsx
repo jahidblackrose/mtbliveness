@@ -99,7 +99,7 @@ function LiveFaceAI() {
   const guidanceDraftRef = useRef<string>("");
   const [centered, setCentered] = useState(false);
   // (legacy in-camera countdown removed — use bigCountdown for post-pass 3-2-1)
-  const [timeLeft, setTimeLeft] = useState<number>(CHALLENGE_TIMEOUT_MS);
+  const [timeLeft, setTimeLeft] = useState<number>(CONFIG.CHALLENGE_TIMEOUT_MS);
   const [flash, setFlash] = useState(false);
   const [blinkTick, setBlinkTick] = useState(0);
   const stepRef = useRef<Step>("start");
@@ -170,8 +170,8 @@ function LiveFaceAI() {
   const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
   const readoutAccumRef = useRef(0);
 
-  const currentTimeoutMs = easyMode ? EASY_CHALLENGE_TIMEOUT_MS : CHALLENGE_TIMEOUT_MS;
-  const currentTimeoutRef = useRef(CHALLENGE_TIMEOUT_MS);
+  const currentTimeoutMs = easyMode ? CONFIG.EASY_CHALLENGE_TIMEOUT_MS : CONFIG.CHALLENGE_TIMEOUT_MS;
+  const currentTimeoutRef = useRef(CONFIG.CHALLENGE_TIMEOUT_MS);
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
 
   const hintKeyFor = (k: ChallengeKind) =>
@@ -227,8 +227,8 @@ function LiveFaceAI() {
         if (e.data && e.data.size > 0) {
           const ts = performance.now();
           chunksRef.current.push({ ts, blob: e.data });
-          // Trim to last VIDEO_WINDOW_MS + 1s of cushion.
-          const cutoff = ts - (VIDEO_WINDOW_MS + 1000);
+          // Trim to last CONFIG.VIDEO_WINDOW_MS + 1s of cushion.
+          const cutoff = ts - (CONFIG.VIDEO_WINDOW_MS + 1000);
           while (chunksRef.current.length > 1 && chunksRef.current[0].ts < cutoff) {
             chunksRef.current.shift();
           }
@@ -428,7 +428,7 @@ function LiveFaceAI() {
     challengePromptedAtRef.current = now;
     breatherUntilRef.current = 0;
     challengeRunningMsRef.current = 0;
-    setTimeLeft(CHALLENGE_TIMEOUT_MS);
+    setTimeLeft(CONFIG.CHALLENGE_TIMEOUT_MS);
     setHintText("");
     setCaptureSeq("idle");
     captureSeqRef.current = "idle";
@@ -543,7 +543,7 @@ function LiveFaceAI() {
       }
 
       captureBufRef.current.push({ ts, brightness, centered: g.ok });
-      if (captureBufRef.current.length > CAPTURE_BUFFER) captureBufRef.current.shift();
+      if (captureBufRef.current.length > CONFIG.CAPTURE_BUFFER) captureBufRef.current.shift();
 
       const currentStep = stepRef.current;
 
@@ -555,7 +555,7 @@ function LiveFaceAI() {
       if (currentStep === "framing") {
         if (g.ok && m) {
           if (framingHoldStartRef.current == null) framingHoldStartRef.current = ts;
-          if (ts - framingHoldStartRef.current >= FRAMING_HOLD_MS) {
+          if (ts - framingHoldStartRef.current >= CONFIG.FRAMING_HOLD_MS) {
             calibAccRef.current = emptyAccumulator();
             calibStartRef.current = ts;
             setStep("calibrating");
@@ -572,8 +572,8 @@ function LiveFaceAI() {
         } else {
           accumulate(calibAccRef.current, m);
           const elapsed = ts - calibStartRef.current;
-          setCalibProgress(Math.min(1, elapsed / CALIBRATION_MS));
-          if (elapsed >= CALIBRATION_MS) {
+          setCalibProgress(Math.min(1, elapsed / CONFIG.CALIBRATION_MS));
+          if (elapsed >= CONFIG.CALIBRATION_MS) {
             baselineRef.current = finalizeBaseline(calibAccRef.current);
             beginChallenges();
           }
@@ -682,13 +682,13 @@ function LiveFaceAI() {
           }
         } else if (canRun && m && baseline) {
           const sinceShown = ts - challengePromptedAtRef.current;
-          if (sinceShown >= PROMPT_READ_DELAY_MS) {
+          if (sinceShown >= CONFIG.PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
             challengeRunningMsRef.current += dt;
             const remaining = Math.max(0, currentTimeoutRef.current - challengeRunningMsRef.current);
             setTimeLeft(remaining);
 
-            if (sinceShown >= PROMPT_REACTION_MIN_MS) {
+            if (sinceShown >= CONFIG.PROMPT_REACTION_MIN_MS) {
               const prev = challengesRef.current[idx];
               const updated = updateChallenge(prev, m, baseline, ts);
               const wasDone = prev.done;
@@ -713,7 +713,7 @@ function LiveFaceAI() {
                 }
                 setChallengeView([...challengesRef.current]);
                 const nextIdx = Math.min(idx + 1, challengesRef.current.length - 1);
-                breatherUntilRef.current = ts + CHALLENGE_BREATHER_MS;
+                breatherUntilRef.current = ts + CONFIG.CHALLENGE_BREATHER_MS;
                 window.setTimeout(() => {
                   if (stepRef.current !== "liveness") return;
                   setActiveIdx(nextIdx);
@@ -725,7 +725,7 @@ function LiveFaceAI() {
                   setSmileMeter(0);
                   setPoseMeter(0);
                   setHintText("");
-                }, CHALLENGE_BREATHER_MS);
+                }, CONFIG.CHALLENGE_BREATHER_MS);
               } else {
                 setChallengeView([...challengesRef.current]);
               }
@@ -748,7 +748,7 @@ function LiveFaceAI() {
               }
 
 
-              if (a >= MAX_ATTEMPTS) {
+              if (a >= CONFIG.MAX_ATTEMPTS) {
                 // If at least one challenge already passed, accept and proceed.
                 const passed = challengesRef.current.filter((c) => c.done).length;
                 if (passed >= 1) {
@@ -866,7 +866,7 @@ function LiveFaceAI() {
     fd.append("meta", JSON.stringify(buildMeta()));
 
     const ctrl = new AbortController();
-    const timer = window.setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT_MS);
+    const timer = window.setTimeout(() => ctrl.abort(), CONFIG.SUBMIT_TIMEOUT_MS);
     try {
       const res = await fetch(API_ENDPOINT, {
         method: "POST",
