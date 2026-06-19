@@ -146,6 +146,7 @@ export const STRINGS = {
     bn: "ধীরে ধীরে মাথা উপর-নিচ করুন",
     en: "Slowly nod your head up and down",
   },
+  wrongWay: { bn: "অন্য দিকে ঘোরান", en: "Turn the other way" },
 
   // Footer
   disclaimer: {
