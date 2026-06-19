@@ -206,13 +206,6 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 // ─────────────────────────────────────────────────────────────────────────────
 export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod";
 
-export const CHALLENGE_LABEL: Record<ChallengeKind, string> = {
-  blink: "Blink twice",
-  smile: "Smile",
-  turnLeft: "Turn your head left",
-  turnRight: "Turn your head right",
-  nod: "Nod your head",
-};
 
 export function pickChallenges(): ChallengeKind[] {
   // 3 challenges total. Always include at least one head movement (parallax
