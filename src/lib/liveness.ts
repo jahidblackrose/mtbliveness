@@ -139,6 +139,8 @@ export type Baseline = {
   jawNeutral: number;
   yaw: number;
   pitch: number;
+  noseDx: number;
+  noseDy: number;
   depthSpread: number;
   noseRelZ: number;
   faceSize: number;
@@ -152,6 +154,8 @@ export function emptyAccumulator() {
     jaw: 0,
     yaw: 0,
     pitch: 0,
+    noseDx: 0,
+    noseDy: 0,
     depthSpread: 0,
     noseRelZ: 0,
     faceSize: 0,
@@ -161,11 +165,14 @@ export type CalibAccumulator = ReturnType<typeof emptyAccumulator>;
 
 export function accumulate(acc: CalibAccumulator, m: FaceMetrics) {
   acc.n += 1;
-  acc.blink += m.blinkAvg;
-  acc.smile += m.smileAvg;
+  // Use MAX for blink/smile to match runtime signal (catches one-eye blinks etc).
+  acc.blink += m.blinkMax;
+  acc.smile += m.smileMax;
   acc.jaw += m.jawOpen;
   acc.yaw += m.yaw;
   acc.pitch += m.pitch;
+  acc.noseDx += m.noseDx;
+  acc.noseDy += m.noseDy;
   acc.depthSpread += m.depthSpread;
   acc.noseRelZ += m.noseRelZ;
   acc.faceSize += m.faceSize;
@@ -173,12 +180,21 @@ export function accumulate(acc: CalibAccumulator, m: FaceMetrics) {
 
 export function finalizeBaseline(acc: CalibAccumulator): Baseline {
   const n = Math.max(1, acc.n);
+  // Sanity check: a "neutral" baseline that's already high means the user
+  // wasn't actually neutral during calibration. Discard and fall back to
+  // safe defaults so absolute thresholds remain achievable.
+  let blinkOpen = acc.blink / n;
+  let smileNeutral = acc.smile / n;
+  if (blinkOpen > 0.3) blinkOpen = 0.1;
+  if (smileNeutral > 0.25) smileNeutral = 0.05;
   return {
-    blinkOpen: acc.blink / n,
-    smileNeutral: acc.smile / n,
+    blinkOpen,
+    smileNeutral,
     jawNeutral: acc.jaw / n,
     yaw: acc.yaw / n,
     pitch: acc.pitch / n,
+    noseDx: acc.noseDx / n,
+    noseDy: acc.noseDy / n,
     depthSpread: acc.depthSpread / n,
     noseRelZ: acc.noseRelZ / n,
     faceSize: acc.faceSize / n,
