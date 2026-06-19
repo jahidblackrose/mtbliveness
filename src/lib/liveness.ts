@@ -290,7 +290,7 @@ export function updateChallenge(
 
   switch (state.kind) {
     case "blink": {
-      // Light EMA so peaks survive.
+      // Light EMA so peaks survive on low FPS.
       const prev = state.blinkEma ?? m.blinkAvg;
       const ema = prev * 0.4 + m.blinkAvg * 0.6;
 
@@ -300,16 +300,31 @@ export function updateChallenge(
 
       let phase = state.blinkPhase ?? "open";
       let count = state.blinkCount ?? 0;
-      if (phase === "open" && ema > highThresh && eyesSymmetric) phase = "closed";
-      else if (phase === "closed" && ema < lowThresh) {
+      let lastCountedAt = state.blinkLastCountedAt ?? 0;
+      let justCountedAt = state.blinkJustCountedAt;
+
+      if (phase === "open" && ema > highThresh && eyesSymmetric) {
+        phase = "closed";
+      } else if (
+        phase === "closed" &&
+        ema < lowThresh &&
+        now - lastCountedAt > TH.BLINK_REFRACTORY_MS
+      ) {
         phase = "open";
         count += 1;
+        lastCountedAt = now;
+        justCountedAt = now;
+      } else if (phase === "closed" && ema < lowThresh) {
+        // open up but suppressed by refractory
+        phase = "open";
       }
       return {
         ...state,
         blinkEma: ema,
         blinkPhase: phase,
         blinkCount: count,
+        blinkLastCountedAt: lastCountedAt,
+        blinkJustCountedAt: justCountedAt,
         done: count >= 2,
       };
     }
