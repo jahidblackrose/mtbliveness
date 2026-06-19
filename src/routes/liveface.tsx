@@ -1352,7 +1352,7 @@ function LivenessScreen({
 
             {isDev && (
               <p className="mt-2 text-[10px] text-white/40">
-                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw.toFixed(2)} · pitch {liveReadout.pitch.toFixed(2)}
+                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw >= 0 ? "+" : ""}{liveReadout.yaw.toFixed(2)} ({(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) > 0 ? "LEFT" : (liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) < 0 ? "RIGHT" : "—"}) · pitch {liveReadout.pitch >= 0 ? "+" : ""}{liveReadout.pitch.toFixed(2)} · Y±{DIRECTION.YAW_LEFT_SIGN} N±{DIRECTION.NOSE_LEFT_SIGN}
               </p>
             )}
           </div>
