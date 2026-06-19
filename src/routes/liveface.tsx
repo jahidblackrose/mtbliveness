@@ -659,11 +659,24 @@ function LiveFaceAI() {
       readoutAccumRef.current += dt;
       if (m && readoutAccumRef.current > 200) {
         readoutAccumRef.current = 0;
+        const activeForReadout = challengesRef.current.find((c) => !c.done)?.kind;
+        const requestedHead =
+          activeForReadout === "turnLeft" || activeForReadout === "turnRight" || activeForReadout === "nod"
+            ? activeForReadout
+            : undefined;
+        const head = baselineRef.current
+          ? inspectHeadGesture(m, baselineRef.current, requestedHead)
+          : null;
         setLiveReadout({
           blink: m.blinkMax,
           smile: m.smileMax,
           yaw: m.yaw,
           pitch: m.pitch,
+          yawChange: head?.yawChange ?? 0,
+          pitchChange: head?.pitchChange ?? 0,
+          dominantAxis: head?.dominantAxis ?? "none",
+          resolved: head?.resolved ?? "none",
+          pass: head?.pass ?? false,
         });
       }
 
@@ -903,16 +916,14 @@ function LiveFaceAI() {
                   setHintText("");
                 }, CONFIG.CHALLENGE_BREATHER_MS);
               } else {
-                // Surface wrong-way feedback for turn challenges in real time.
-                if (
-                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
-                  updated.wrongWay
-                ) {
-                  setHintText(t("wrongWay", langRef.current));
+                // Surface strict signed-axis feedback for head challenges.
+                if (updated.wrongHint) {
+                  setHintText(t(updated.wrongHint, langRef.current));
                 } else if (
-                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
                   !updated.wrongWay &&
-                  hintTextRef.current === t("wrongWay", langRef.current)
+                  (hintTextRef.current === t("turnOtherWay", langRef.current) ||
+                    hintTextRef.current === t("wrongDir", langRef.current) ||
+                    hintTextRef.current === t("nodNotSide", langRef.current))
                 ) {
                   setHintText("");
                 }
