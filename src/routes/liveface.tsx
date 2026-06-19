@@ -192,11 +192,16 @@ function LiveFaceAI() {
   const stopAll = useCallback(() => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    if (captureIntervalRef.current != null) {
+      window.clearInterval(captureIntervalRef.current);
+      captureIntervalRef.current = null;
+    }
     stopRecorder();
     chunksRef.current = [];
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
   }, [stopRecorder]);
+
 
   useEffect(() => () => stopAll(), [stopAll]);
   useEffect(
