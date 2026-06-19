@@ -1243,6 +1243,7 @@ function LivenessScreen({
   hintText,
   easyMode,
   fps,
+  integrity,
   isDev,
   devOpen,
   onToggleDev,
