@@ -968,7 +968,19 @@ function LiveFaceAI() {
         )}
 
         {step === "result" && photoUrl && (
-          <ResultScreen photoUrl={photoUrl} onRetake={retake} onConfirm={reset} tx={tx} />
+          <ResultScreen
+            photoUrl={photoUrl}
+            videoUrl={videoUrl}
+            videoSupported={videoSupported}
+            imageBlob={imageBlob}
+            videoBlob={videoBlob}
+            submitState={submitState}
+            submitError={submitError}
+            onRetake={retake}
+            onSubmit={submit}
+            onHome={reset}
+            tx={tx}
+          />
         )}
         {step === "error" && <ErrorScreen msg={errorMsg} onRetry={start} onHome={reset} tx={tx} />}
 
