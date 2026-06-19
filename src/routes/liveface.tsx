@@ -320,7 +320,7 @@ function LiveFaceAI() {
       const sim = signatureSimilarity(ref, cur);
       setLiveSim(sim);
       if (sim < INTEGRITY.SIM_CAPTURE) {
-        integrityRestart("mismatch");
+        integrityRestartRef.current?.("mismatch");
         return;
       }
     } else if (ref && !cur) {
