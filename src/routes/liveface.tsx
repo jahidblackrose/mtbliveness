@@ -115,6 +115,30 @@ function LiveFaceAI() {
   const captureBufRef = useRef<{ ts: number; brightness: number; centered: boolean }[]>([]);
   const spoofRef = useRef<SpoofGuard>(new SpoofGuard());
 
+  // ── New: pause / soft-timeout / attempts / easy mode / fps / dev panel
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  const [softTimeoutIdx, setSoftTimeoutIdx] = useState<number | null>(null);
+  const softTimeoutRef = useRef<number | null>(null);
+  useEffect(() => { softTimeoutRef.current = softTimeoutIdx; }, [softTimeoutIdx]);
+
+  const attemptsRef = useRef<number[]>([]); // attempts per challenge index
+  const [easyMode, setEasyModeState] = useState(false);
+  const [hintText, setHintText] = useState<string>("");
+  const sessionStartRef = useRef<number>(0);
+  const challengeRunningMsRef = useRef<number>(0);
+  const lastTickRef = useRef<number>(0);
+
+  const [fps, setFps] = useState(0);
+  const fpsAccumRef = useRef<{ frames: number; lastReport: number }>({ frames: 0, lastReport: 0 });
+
+  const [devOpen, setDevOpen] = useState(false);
+  const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
+
+  const currentTimeoutMs = easyMode ? EASY_CHALLENGE_TIMEOUT_MS : CHALLENGE_TIMEOUT_MS;
+
   useEffect(() => {
     stepRef.current = step;
   }, [step]);
