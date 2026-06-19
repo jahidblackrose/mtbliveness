@@ -215,22 +215,17 @@ export const CHALLENGE_LABEL: Record<ChallengeKind, string> = {
 };
 
 export function pickChallenges(): ChallengeKind[] {
-  // Always include at least one head turn (parallax test).
-  const turn: ChallengeKind = Math.random() < 0.5 ? "turnLeft" : "turnRight";
-  const others: ChallengeKind[] = ["blink", "smile", "nod"];
-  // shuffle others
-  for (let i = others.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [others[i], others[j]] = [others[j], others[i]];
-  }
-  const picked: ChallengeKind[] = [turn, others[0], others[1]];
-  // shuffle final order
-  for (let i = picked.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [picked[i], picked[j]] = [picked[j], picked[i]];
-  }
+  // 2 challenges total. Always include exactly one head movement (needed
+  // for the parallax/3D check). The other is the easiest non-pose action.
+  const head: ChallengeKind = (["turnLeft", "turnRight", "nod"] as const)[
+    Math.floor(Math.random() * 3)
+  ];
+  const easy: ChallengeKind = Math.random() < 0.5 ? "blink" : "smile";
+  const picked: ChallengeKind[] = [head, easy];
+  if (Math.random() < 0.5) picked.reverse();
   return picked;
 }
+
 
 export type ChallengeState = {
   kind: ChallengeKind;
