@@ -63,6 +63,29 @@ const CALIBRATION_MS = 1500;
 const PROMPT_REACTION_MIN_MS = 250;
 const CAPTURE_BUFFER = 5;
 
+// ── Submission config (edit these to point at your liveness API) ──
+const API_ENDPOINT: string =
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_LIVENESS_API_ENDPOINT ||
+  "https://example.com/api/liveness";
+const API_KEY: string =
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_LIVENESS_API_KEY || "";
+const SUBMIT_TIMEOUT_MS = 30_000;
+const VIDEO_WINDOW_MS = 10_000;
+
+function pickVideoMime(): string | undefined {
+  if (typeof MediaRecorder === "undefined") return undefined;
+  const candidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  for (const m of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
+type VideoChunk = { ts: number; blob: Blob };
+
+
 function LiveFaceAI() {
   const [lang, setLang] = useState<Lang>("bn");
   const langRef = useRef<Lang>("bn");
