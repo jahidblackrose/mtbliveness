@@ -266,30 +266,31 @@ export const TH = {
   FACE_SIZE_MIN: 0.28,
   FACE_SIZE_MAX: 0.9,
   BRIGHT_MIN: 40,
-  // Head turn — gentle (~12.6°) and momentary is enough.
-  YAW_TURN: 0.22,
-  YAW_TURN_ABS: 0.22,
-  NOSE_TURN_ABS: 0.18, // |noseDx| fallback (face-width fraction)
-  // Nod
+  // Head turn — ~11° momentary cross.
+  YAW_TURN: 0.20,
+  YAW_TURN_ABS: 0.20,
+  NOSE_TURN_ABS: 0.16,
+  // Nod ~10–12°
   PITCH_NOD: 0.18,
   PITCH_NOD_ABS: 0.18,
-  NOSE_NOD_ABS: 0.10, // |noseDy delta| fallback (face-height fraction)
-  // Smile
-  SMILE_HOLD_MS: 180,
-  SMILE_DELTA: 0.10,
-  SMILE_ABS: 0.30,
-  JAW_TALKING: 0.6,
-  // Blink — single peak counts, short refractory.
-  BLINK_HIGH_OFFSET: 0.20,
-  BLINK_LOW_OFFSET: 0.08,
-  BLINK_ABS: 0.45,
-  BLINK_REFRACTORY_MS: 180,
+  NOSE_NOD_ABS: 0.08,
+  // Smile — short hold, low floor.
+  SMILE_HOLD_MS: 130,
+  SMILE_DELTA: 0.08,
+  SMILE_ABS: 0.27,
+  JAW_TALKING: 0.7,
+  // Blink — single peak, very short refractory, low floor.
+  BLINK_HIGH_OFFSET: 0.18,
+  BLINK_LOW_OFFSET: 0.07,
+  BLINK_ABS: 0.40,
+  BLINK_REFRACTORY_MS: 150,
   // Spoof
   DEPTH_MIN_RATIO: 0.55,
   PARALLAX_MIN: 0.012,
-  // Auto-assist after a clearly-attempting user stalls.
-  ASSIST_AFTER_MS: 3000,
-  ASSIST_FACTOR: 0.7,
+  // Auto-assist after a stalled attempt.
+  ASSIST_AFTER_MS: 2500,
+  ASSIST_FACTOR: 0.65,
+
 };
 
 export const EASY = { on: false };
