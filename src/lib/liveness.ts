@@ -215,22 +215,17 @@ export const CHALLENGE_LABEL: Record<ChallengeKind, string> = {
 };
 
 export function pickChallenges(): ChallengeKind[] {
-  // Always include at least one head turn (parallax test).
-  const turn: ChallengeKind = Math.random() < 0.5 ? "turnLeft" : "turnRight";
-  const others: ChallengeKind[] = ["blink", "smile", "nod"];
-  // shuffle others
-  for (let i = others.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [others[i], others[j]] = [others[j], others[i]];
-  }
-  const picked: ChallengeKind[] = [turn, others[0], others[1]];
-  // shuffle final order
-  for (let i = picked.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [picked[i], picked[j]] = [picked[j], picked[i]];
-  }
+  // 2 challenges total. Always include exactly one head movement (needed
+  // for the parallax/3D check). The other is the easiest non-pose action.
+  const head: ChallengeKind = (["turnLeft", "turnRight", "nod"] as const)[
+    Math.floor(Math.random() * 3)
+  ];
+  const easy: ChallengeKind = Math.random() < 0.5 ? "blink" : "smile";
+  const picked: ChallengeKind[] = [head, easy];
+  if (Math.random() < 0.5) picked.reverse();
   return picked;
 }
+
 
 export type ChallengeState = {
   kind: ChallengeKind;
@@ -252,6 +247,11 @@ export type ChallengeState = {
   parallaxStartNoseRelZ?: number;
   parallaxStartYaw?: number;
   parallaxOk?: boolean;
+  // nod transition tracker
+  nodPhase?: "neutral" | "down" | "up";
+  nodPitchEma?: number;
+  nodBasePitch?: number;
+
 };
 
 export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
@@ -271,30 +271,31 @@ export const TH = {
   FACE_SIZE_MIN: 0.28,
   FACE_SIZE_MAX: 0.9,
   BRIGHT_MIN: 40,
-  // Head turn — gentle (~12.6°) and momentary is enough.
-  YAW_TURN: 0.22,
-  YAW_TURN_ABS: 0.22,
-  NOSE_TURN_ABS: 0.18, // |noseDx| fallback (face-width fraction)
-  // Nod
+  // Head turn — ~11° momentary cross.
+  YAW_TURN: 0.20,
+  YAW_TURN_ABS: 0.20,
+  NOSE_TURN_ABS: 0.16,
+  // Nod ~10–12°
   PITCH_NOD: 0.18,
   PITCH_NOD_ABS: 0.18,
-  NOSE_NOD_ABS: 0.10, // |noseDy delta| fallback (face-height fraction)
-  // Smile
-  SMILE_HOLD_MS: 180,
-  SMILE_DELTA: 0.10,
-  SMILE_ABS: 0.30,
-  JAW_TALKING: 0.6,
-  // Blink — single peak counts, short refractory.
-  BLINK_HIGH_OFFSET: 0.20,
-  BLINK_LOW_OFFSET: 0.08,
-  BLINK_ABS: 0.45,
-  BLINK_REFRACTORY_MS: 180,
+  NOSE_NOD_ABS: 0.08,
+  // Smile — short hold, low floor.
+  SMILE_HOLD_MS: 130,
+  SMILE_DELTA: 0.08,
+  SMILE_ABS: 0.27,
+  JAW_TALKING: 0.7,
+  // Blink — single peak, very short refractory, low floor.
+  BLINK_HIGH_OFFSET: 0.18,
+  BLINK_LOW_OFFSET: 0.07,
+  BLINK_ABS: 0.40,
+  BLINK_REFRACTORY_MS: 150,
   // Spoof
   DEPTH_MIN_RATIO: 0.55,
   PARALLAX_MIN: 0.012,
-  // Auto-assist after a clearly-attempting user stalls.
-  ASSIST_AFTER_MS: 3000,
-  ASSIST_FACTOR: 0.7,
+  // Auto-assist after a stalled attempt.
+  ASSIST_AFTER_MS: 2500,
+  ASSIST_FACTOR: 0.65,
+
 };
 
 export const EASY = { on: false };
@@ -461,22 +462,63 @@ export function updateChallenge(
     }
 
     case "nod": {
-      // Nod = up OR down. Use pose-matrix pitch OR nose vertical offset
-      // relative to baseline. Whichever fires first wins.
-      const pitchRel = Math.abs(m.pitch - baseline.pitch);
-      const noseRel = Math.abs(m.noseDy - baseline.noseDy);
-      const pitchTh = TH.PITCH_NOD_ABS * mul;
-      const noseTh = TH.NOSE_NOD_ABS * mul;
+      // Combined nod signal: pitch from pose matrix + nose vertical offset
+      // (whichever is moving more). Detect a TRANSITION: cross a threshold
+      // in one direction then return toward neutral. Accept either order
+      // (up-then-down or down-then-up). A single momentary cross is enough
+      // once the auto-assist kicks in.
+      const pitchSigned =
+        Math.abs(m.pitch - baseline.pitch) > Math.abs(m.noseDy - baseline.noseDy) * 1.8
+          ? m.pitch - baseline.pitch
+          : m.noseDy - baseline.noseDy; // noseDy: + = down
+      const prev = state.nodPitchEma ?? pitchSigned;
+      const ema = prev * 0.5 + pitchSigned * 0.5;
+      const pitchTh = Math.min(TH.PITCH_NOD_ABS, TH.NOSE_NOD_ABS * 2.2) * mul;
+
+      let phase = state.nodPhase ?? "neutral";
+      let count = state.blinkCount ?? 0; // reuse counter slot
+      let lastAt = state.blinkLastCountedAt ?? 0;
+
+      const justCount = () => {
+        count += 1;
+        lastAt = now;
+      };
+
+      if (phase === "neutral") {
+        if (ema > pitchTh) phase = "down";
+        else if (ema < -pitchTh) phase = "up";
+      } else if (phase === "down") {
+        if (ema < pitchTh * 0.3 && now - lastAt > 120) {
+          justCount();
+          phase = "neutral";
+        }
+      } else if (phase === "up") {
+        if (ema > -pitchTh * 0.3 && now - lastAt > 120) {
+          justCount();
+          phase = "neutral";
+        }
+      }
+
+      // Generous auto-assist: after ASSIST_AFTER_MS, a single momentary cross
+      // (without a return) counts as done.
+      const momentary = Math.abs(ema) > pitchTh;
+      const done = count >= 1 || (mul < 1 && momentary);
+
       const progress = Math.max(
         0,
-        Math.min(1, Math.max(pitchRel / pitchTh, noseRel / noseTh)),
+        Math.min(1, Math.abs(ema) / pitchTh),
       );
       return {
         ...state,
         poseProgress: progress,
-        done: pitchRel > pitchTh || noseRel > noseTh,
+        nodPhase: phase,
+        nodPitchEma: ema,
+        blinkCount: count,
+        blinkLastCountedAt: lastAt,
+        done,
       };
     }
+
   }
 }
 

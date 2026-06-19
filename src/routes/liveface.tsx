@@ -33,6 +33,7 @@ import {
   type Lang,
   t,
 } from "@/lib/liveness-i18n";
+import { ChallengeDemo } from "@/components/challenge-demo";
 
 export const Route = createFileRoute("/liveface")({
   ssr: false,
@@ -551,16 +552,17 @@ function LiveFaceAI() {
               // Auto-hint after first timeout on this challenge.
               setHintText(t(hintKeyFor(cur.kind) as Parameters<typeof t>[0], L));
 
-              // Enable easy mode if same challenge failed ≥ 2 times.
-              if (a >= 2 && !EASY.on) {
+              // Enable easy mode immediately after the first miss.
+              if (a >= 1 && !EASY.on) {
                 setEasyMode(true);
                 setEasyModeState(true);
               }
 
+
               if (a >= MAX_ATTEMPTS) {
-                // If at least 2 challenges already passed, accept and proceed.
+                // If at least one challenge already passed, accept and proceed.
                 const passed = challengesRef.current.filter((c) => c.done).length;
-                if (passed >= 2) {
+                if (passed >= 1) {
                   challengesRef.current.forEach((c, i) => {
                     if (i >= idx) challengesRef.current[i] = { ...c, done: true };
                   });
@@ -572,6 +574,7 @@ function LiveFaceAI() {
                 return;
               }
               setSoftTimeoutIdx(idx);
+
             }
           }
         }
@@ -943,9 +946,27 @@ function LivenessScreen({
                 )}
               </div>
             </div>
-            <p className="mt-0.5 text-lg font-semibold leading-tight text-white">
-              {instruction}
-            </p>
+            <div className="mt-0.5 flex items-center gap-2.5">
+              {phase === "liveness" && active && (
+                <ChallengeDemo kind={active.kind} done={active.done} size={44} />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base font-semibold leading-tight text-white sm:text-lg">
+                  {instruction}
+                </p>
+                {phase === "liveness" && meterLine && active?.kind !== "blink" && (
+                  <p className="text-[11px] text-white/70">{meterLine}</p>
+                )}
+                {phase === "liveness" && (
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/15">
+                    <div
+                      className="h-full bg-emerald-400 transition-[width] duration-100"
+                      style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
             <p
               className={`mt-1 text-xs ${
                 centered ? "text-emerald-200/90" : "text-amber-200/90"
@@ -956,17 +977,7 @@ function LivenessScreen({
             {hintText && !inSoft && (
               <p className="mt-1 text-[11px] text-amber-200/90">{hintText}</p>
             )}
-            {phase === "liveness" && meterLine && active?.kind !== "blink" && (
-              <p className="mt-1 text-[11px] text-white/70">{meterLine}</p>
-            )}
-            {phase === "liveness" && (
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
-                <div
-                  className="h-full bg-emerald-400 transition-[width] duration-100"
-                  style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
-                />
-              </div>
-            )}
+
             {isDev && (
               <p className="mt-1 text-[10px] text-white/50">FPS: {fps}</p>
             )}

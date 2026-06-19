@@ -16,7 +16,16 @@ export const STRINGS = {
   startBtn: { bn: "শুরু করুন", en: "Start verification" },
   step1: { bn: "ক্যামেরার অনুমতি দিন", en: "Allow camera access" },
   step2: { bn: "ফ্রেমের মাঝে মুখ রাখুন", en: "Center your face in the oval" },
-  step3: { bn: "৩টি র‍্যান্ডম কাজ সম্পন্ন করুন", en: "Complete 3 randomized challenges" },
+  step3: { bn: "২টি র‍্যান্ডম কাজ সম্পন্ন করুন", en: "Complete 2 randomized challenges" },
+  almostThere: {
+    bn: "প্রায় হয়ে গেছে, আরেকটু",
+    en: "Almost there, a little more",
+  },
+  faceNotClear: {
+    bn: "মুখ ভালোভাবে দেখা যাচ্ছে না, আলো বাড়ান",
+    en: "Face not clear, improve lighting",
+  },
+
   step4: { bn: "ছবি স্বয়ংক্রিয়ভাবে তোলা হবে", en: "We'll auto-capture your photo" },
   loading: { bn: "ডিভাইসে মডেল লোড হচ্ছে…", en: "Loading on-device model…" },
 
@@ -42,6 +51,8 @@ export const STRINGS = {
   keepSmiling: { bn: "হাসি ধরে রাখুন…", en: "Keep smiling…" },
   showSmile: { bn: "একটু হাসুন", en: "Show a smile" },
   slowSteady: { bn: "ধীরে স্থিরভাবে", en: "Slow and steady" },
+  nodHint: { bn: "মাথা উপর-নিচ", en: "Up and down" },
+
 
   // Phase headers
   framing: { bn: "ফ্রেমিং", en: "Framing" },
