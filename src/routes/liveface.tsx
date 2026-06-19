@@ -23,6 +23,7 @@ import {
   newChallengeState,
   pickChallenges,
   updateChallenge,
+  inspectHeadGesture,
   avgBrightness,
   accumulate,
   finalizeBaseline,
@@ -176,7 +177,17 @@ function LiveFaceAI() {
   const lastFramingOkRef = useRef(false);
   const captureIntervalRef = useRef<number | null>(null);
 
-  const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
+  const [liveReadout, setLiveReadout] = useState({
+    blink: 0,
+    smile: 0,
+    yaw: 0,
+    pitch: 0,
+    yawChange: 0,
+    pitchChange: 0,
+    dominantAxis: "none",
+    resolved: "none",
+    pass: false,
+  });
   const readoutAccumRef = useRef(0);
 
   // ── Post-pass integrity gate: reference signature + live similarity ──
@@ -648,11 +659,24 @@ function LiveFaceAI() {
       readoutAccumRef.current += dt;
       if (m && readoutAccumRef.current > 200) {
         readoutAccumRef.current = 0;
+        const activeForReadout = challengesRef.current.find((c) => !c.done)?.kind;
+        const requestedHead =
+          activeForReadout === "turnLeft" || activeForReadout === "turnRight" || activeForReadout === "nod"
+            ? activeForReadout
+            : undefined;
+        const head = baselineRef.current
+          ? inspectHeadGesture(m, baselineRef.current, requestedHead)
+          : null;
         setLiveReadout({
           blink: m.blinkMax,
           smile: m.smileMax,
           yaw: m.yaw,
           pitch: m.pitch,
+          yawChange: head?.yawChange ?? 0,
+          pitchChange: head?.pitchChange ?? 0,
+          dominantAxis: head?.dominantAxis ?? "none",
+          resolved: head?.resolved ?? "none",
+          pass: head?.pass ?? false,
         });
       }
 
@@ -892,16 +916,14 @@ function LiveFaceAI() {
                   setHintText("");
                 }, CONFIG.CHALLENGE_BREATHER_MS);
               } else {
-                // Surface wrong-way feedback for turn challenges in real time.
-                if (
-                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
-                  updated.wrongWay
-                ) {
-                  setHintText(t("wrongWay", langRef.current));
+                // Surface strict signed-axis feedback for head challenges.
+                if (updated.wrongHint) {
+                  setHintText(t(updated.wrongHint, langRef.current));
                 } else if (
-                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
                   !updated.wrongWay &&
-                  hintTextRef.current === t("wrongWay", langRef.current)
+                  (hintTextRef.current === t("turnOtherWay", langRef.current) ||
+                    hintTextRef.current === t("wrongDir", langRef.current) ||
+                    hintTextRef.current === t("nodNotSide", langRef.current))
                 ) {
                   setHintText("");
                 }
@@ -1260,7 +1282,17 @@ function LivenessScreen({
   centered: boolean;
   countdown: number | null;
   captureSeq: "idle" | "success" | "lookStraight" | "countdown" | "capturing";
-  liveReadout: { blink: number; smile: number; yaw: number; pitch: number };
+  liveReadout: {
+    blink: number;
+    smile: number;
+    yaw: number;
+    pitch: number;
+    yawChange: number;
+    pitchChange: number;
+    dominantAxis: string;
+    resolved: string;
+    pass: boolean;
+  };
   timeLeft: number;
   timeoutMs: number;
   flash: boolean;
@@ -1504,10 +1536,10 @@ function LivenessScreen({
             {isDev && (
               <>
                 <p className="mt-2 text-[10px] text-white/40">
-                  FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw >= 0 ? "+" : ""}{liveReadout.yaw.toFixed(2)} ({(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) > 0 ? "LEFT" : (liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) < 0 ? "RIGHT" : "—"}) · pitch {liveReadout.pitch >= 0 ? "+" : ""}{liveReadout.pitch.toFixed(2)} · Y±{DIRECTION.YAW_LEFT_SIGN} N±{DIRECTION.NOSE_LEFT_SIGN}
+                  FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · signed yaw {(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) >= 0 ? "+" : ""}{(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN).toFixed(2)} · signed pitch {liveReadout.pitch >= 0 ? "+" : ""}{liveReadout.pitch.toFixed(2)} · yawChange {liveReadout.yawChange >= 0 ? "+" : ""}{liveReadout.yawChange.toFixed(2)} · pitchChange {liveReadout.pitchChange >= 0 ? "+" : ""}{liveReadout.pitchChange.toFixed(2)}
                 </p>
                 <p className="mt-1 text-[10px] text-white/40">
-                  idx {integrity.currentIdx} · passed {integrity.passed}/{challenges.length} · refSig {integrity.refCaptured ? "✓" : "—"} · sim {integrity.liveSim.toFixed(2)} · {integrity.decision}
+                  dominant {liveReadout.dominantAxis} · gesture {liveReadout.resolved} · pass {liveReadout.pass ? "YES" : "NO"} · Y±{DIRECTION.YAW_LEFT_SIGN} · mirrored {DIRECTION.MIRRORED ? "yes" : "no"} · idx {integrity.currentIdx} · passed {integrity.passed}/{challenges.length} · refSig {integrity.refCaptured ? "✓" : "—"} · sim {integrity.liveSim.toFixed(2)} · {integrity.decision}
                 </p>
               </>
             )}

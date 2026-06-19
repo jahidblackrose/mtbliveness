@@ -147,6 +147,9 @@ export const STRINGS = {
     en: "Slowly nod your head up and down",
   },
   wrongWay: { bn: "অন্য দিকে ঘোরান", en: "Turn the other way" },
+  wrongDir: { bn: "নির্দেশ অনুযায়ী দিক ঠিক করুন", en: "Wrong direction — follow the instruction" },
+  turnOtherWay: { bn: "অন্য দিকে ঘোরান", en: "Turn the other way" },
+  nodNotSide: { bn: "মাথা উপরে-নিচে করুন, পাশে নয়", en: "Move up-down, not sideways" },
   faceChanged: {
     bn: "মুখ পরিবর্তিত হয়েছে। শুরু থেকে আবার করুন।",
     en: "Face changed — restarting from the beginning.",

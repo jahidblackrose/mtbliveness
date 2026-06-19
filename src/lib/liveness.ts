@@ -31,17 +31,34 @@ function bs(cls: Classifications[] | undefined, name: string): number {
 }
 
 // Extract yaw/pitch/roll (radians) from a 4x4 column-major transformation matrix.
-function poseFromMatrix(m: Matrix | undefined): { yaw: number; pitch: number; roll: number } {
-  if (!m || !m.data || m.data.length < 16) return { yaw: 0, pitch: 0, roll: 0 };
+// MediaPipe's rotation matrix exposes yaw around the vertical axis and pitch
+// around the horizontal axis separately; do not swap these with roll.
+function poseFromMatrix(m: Matrix | undefined): { yaw: number; pitch: number; roll: number } | null {
+  if (!m || !m.data || m.data.length < 16) return null;
   const d = m.data;
   // Column-major: element(row, col) = d[col*4 + row]
   const r00 = d[0], r10 = d[1], r20 = d[2];
   const r21 = d[6];
   const r22 = d[10];
-  const pitch = Math.atan2(-r20, Math.hypot(r21, r22));
-  const yaw = Math.atan2(r10, r00);
-  const roll = Math.atan2(r21, r22);
+  const yaw = Math.atan2(-r20, Math.hypot(r21, r22));
+  const pitch = Math.atan2(r21, r22);
+  const roll = Math.atan2(r10, r00);
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch) || !Number.isFinite(roll)) return null;
   return { yaw, pitch, roll };
+}
+
+function poseFromLandmarks(lm: L[]): { yaw: number; pitch: number; roll: number } {
+  const eyeMidX = (lm[LEFT_EYE_OUTER].x + lm[RIGHT_EYE_OUTER].x) / 2;
+  const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
+  const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
+  const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
+  return {
+    yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceW) * 2,
+    // Nose-to-eye-line has a positive neutral offset, so center it to keep
+    // frameGuidance usable if matrix pose is unavailable.
+    pitch: (((lm[NOSE_TIP].y - eyeMidY) / faceH) - 0.38) * 2.2,
+    roll: 0,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,18 +97,7 @@ export function computeMetrics(
   const smileRight = bs(blendshapes, "mouthSmileRight");
   const jawOpen = bs(blendshapes, "jawOpen");
 
-  let pose = poseFromMatrix(matrix);
-  if (pose.yaw === 0 && pose.pitch === 0 && pose.roll === 0) {
-    const eyeMidX = (lm[LEFT_EYE_OUTER].x + lm[RIGHT_EYE_OUTER].x) / 2;
-    const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
-    const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
-    const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
-    pose = {
-      yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceW) * 2,
-      pitch: ((lm[NOSE_TIP].y - eyeMidY) / faceH) * 2,
-      roll: 0,
-    };
-  }
+  const pose = poseFromMatrix(matrix) ?? poseFromLandmarks(lm);
 
   const cx = (lm[FACE_LEFT].x + lm[FACE_RIGHT].x) / 2;
   const cy = (lm[FACE_TOP].y + lm[FACE_BOTTOM].y) / 2;
@@ -246,6 +252,9 @@ export type ChallengeState = {
   parallaxOk?: boolean;
   // turn feedback: user is turning the wrong way relative to instruction
   wrongWay?: boolean;
+  wrongHint?: "wrongDir" | "turnOtherWay" | "nodNotSide";
+  startedNearNeutral?: boolean;
+  headDebug?: HeadGestureDebug;
   // nod transition tracker
   nodPhase?: "neutral" | "down" | "up";
   nodPitchEma?: number;
@@ -356,6 +365,140 @@ export function setEasyMode(on: boolean) {
   }
 }
 
+export type DominantAxis = "yaw" | "pitch" | "none";
+export type ResolvedGesture = "TURN-LEFT" | "TURN-RIGHT" | "LOOK-UPDOWN" | "none";
+export type HeadGestureDebug = {
+  signedYaw: number;
+  signedPitch: number;
+  yawChange: number;
+  pitchChange: number;
+  dominantAxis: DominantAxis;
+  resolved: ResolvedGesture;
+  pass: boolean;
+  correctAxis: boolean;
+  correctSign: boolean;
+  startedNearNeutral: boolean;
+  wrongHint?: "wrongDir" | "turnOtherWay" | "nodNotSide";
+};
+
+function square(v: number) {
+  return v * v;
+}
+
+function axisDominance(yawChange: number, pitchChange: number): DominantAxis {
+  const yaw2 = square(yawChange);
+  const pitch2 = square(pitchChange);
+  if (yaw2 > pitch2 * 1.05) return "yaw";
+  if (pitch2 > yaw2 * 1.05) return "pitch";
+  return "none";
+}
+
+function nearNeutral(yawChange: number, pitchChange: number, yawTh: number, pitchTh: number) {
+  const yawNeutral = yawTh * 0.35;
+  const pitchNeutral = pitchTh * 0.35;
+  return square(yawChange) <= square(yawNeutral) && square(pitchChange) <= square(pitchNeutral);
+}
+
+function resolvedGesture(
+  yawChange: number,
+  pitchChange: number,
+  yawTh: number,
+  pitchTh: number,
+  dominantAxis: DominantAxis,
+): ResolvedGesture {
+  if (dominantAxis === "yaw") {
+    if (yawChange > yawTh) return "TURN-LEFT";
+    if (-yawChange > yawTh) return "TURN-RIGHT";
+  }
+  if (dominantAxis === "pitch" && (pitchChange > pitchTh || -pitchChange > pitchTh)) {
+    return "LOOK-UPDOWN";
+  }
+  return "none";
+}
+
+function calibrateYawSignFromNose(
+  m: FaceMetrics,
+  baseline: Baseline,
+  targetDir: 1 | -1,
+  yawTh: number,
+  pitchTh: number,
+) {
+  if (DIRECTION.calibratedYaw) return;
+  const rawYawChange = m.yaw - baseline.yaw;
+  const yawChange = rawYawChange * DIRECTION.YAW_LEFT_SIGN;
+  const pitchChange = m.pitch - baseline.pitch;
+  const noseChange = (m.noseDx - baseline.noseDx) * DIRECTION.NOSE_LEFT_SIGN;
+  const noseTh = TH.NOSE_TURN_ABS;
+
+  // Use nose offset only as a sign reference for mirrored/device variance.
+  // Passing still depends on canonical signed yaw only.
+  const noseSupportsPrompt = noseChange * targetDir > noseTh;
+  const yawOpposesPrompt = yawChange * targetDir < -yawTh * 0.5;
+  const yawSupportsPrompt = yawChange * targetDir > yawTh;
+  const horizontalEnough = square(yawChange) > square(pitchChange) && square(noseChange) > square(noseTh);
+
+  if (horizontalEnough && noseSupportsPrompt && yawOpposesPrompt) {
+    DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
+    DIRECTION.calibratedYaw = true;
+  } else if (horizontalEnough && yawSupportsPrompt && square(pitchChange) < square(pitchTh)) {
+    DIRECTION.calibratedYaw = true;
+  }
+}
+
+export function inspectHeadGesture(
+  m: FaceMetrics,
+  baseline: Baseline,
+  requested?: Extract<ChallengeKind, "turnLeft" | "turnRight" | "nod">,
+  startedNearNeutral = true,
+  mul = 1,
+): HeadGestureDebug {
+  const yawTh = TH.YAW_TURN_ABS * mul;
+  const pitchTh = TH.PITCH_NOD_ABS * mul;
+  const signedYaw = m.yaw * DIRECTION.YAW_LEFT_SIGN;
+  const signedPitch = m.pitch;
+  const yawChange = (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN;
+  const pitchChange = m.pitch - baseline.pitch;
+  const dominantAxis = axisDominance(yawChange, pitchChange);
+  const resolved = resolvedGesture(yawChange, pitchChange, yawTh, pitchTh, dominantAxis);
+
+  let pass = false;
+  let correctAxis = false;
+  let correctSign = false;
+  let wrongHint: HeadGestureDebug["wrongHint"];
+
+  if (requested === "turnLeft" || requested === "turnRight") {
+    const targetDir = requested === "turnLeft" ? 1 : -1;
+    correctAxis = dominantAxis === "yaw";
+    correctSign = yawChange * targetDir > yawTh;
+    pass = startedNearNeutral && correctAxis && correctSign;
+    if (!pass && dominantAxis === "yaw" && yawChange * -targetDir > yawTh) wrongHint = "turnOtherWay";
+    else if (!pass && resolved !== "none") wrongHint = "wrongDir";
+  } else if (requested === "nod") {
+    correctAxis = dominantAxis === "pitch";
+    correctSign = pitchChange > pitchTh || -pitchChange > pitchTh;
+    pass = startedNearNeutral && correctAxis && correctSign;
+    if (!pass && dominantAxis === "yaw" && (yawChange > yawTh || -yawChange > yawTh)) {
+      wrongHint = "nodNotSide";
+    } else if (!pass && resolved !== "none") {
+      wrongHint = "wrongDir";
+    }
+  }
+
+  return {
+    signedYaw,
+    signedPitch,
+    yawChange,
+    pitchChange,
+    dominantAxis,
+    resolved,
+    pass,
+    correctAxis,
+    correctSign,
+    startedNearNeutral,
+    wrongHint,
+  };
+}
+
 // Auto-assist factor based on how long the user has been attempting.
 function assistMul(state: ChallengeState, now: number) {
   return now - state.startedAt > TH.ASSIST_AFTER_MS ? TH.ASSIST_FACTOR : 1;
@@ -447,79 +590,35 @@ export function updateChallenge(
 
     case "turnLeft":
     case "turnRight": {
-      // Target direction in "user perspective": +1 = user's LEFT, -1 = RIGHT.
       const targetDir = state.kind === "turnLeft" ? 1 : -1;
-
-      // Raw signed deltas from baseline.
-      const yawDelta = m.yaw - baseline.yaw;
-      const noseDelta = m.noseDx - baseline.noseDx;
-
-      // Project each signal onto the target direction via DIRECTION mapping.
-      // Positive ⇒ moving the requested way; Negative ⇒ moving the WRONG way.
-      const yawToward = yawDelta * DIRECTION.YAW_LEFT_SIGN * targetDir;
-      const noseToward = noseDelta * DIRECTION.NOSE_LEFT_SIGN * targetDir;
-
+      calibrateYawSignFromNose(m, baseline, targetDir, TH.YAW_TURN_ABS * mul, TH.PITCH_NOD_ABS * mul);
+      const neutralReady =
+        state.startedNearNeutral === true ||
+        nearNeutral(
+          (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN,
+          m.pitch - baseline.pitch,
+          TH.YAW_TURN_ABS * mul,
+          TH.PITCH_NOD_ABS * mul,
+        );
+      const debug = inspectHeadGesture(m, baseline, state.kind, neutralReady, mul);
+      const yawToward = debug.yawChange * targetDir;
       const yawTh = TH.YAW_TURN_ABS * mul;
-      const noseTh = TH.NOSE_TURN_ABS * mul;
+      const progress = Math.max(0, Math.min(1, yawToward / yawTh));
 
-      // Self-calibration: if a signal shows a CLEAR, sustained movement that
-      // is opposite to the target while the other signal agrees with the
-      // target (or is small), flip THAT signal's sign once per session.
-      const yawMag = Math.abs(yawDelta);
-      const noseMag = Math.abs(noseDelta);
-      const elapsed = now - state.startedAt;
-      if (elapsed > 900) {
-        if (!DIRECTION.calibratedYaw && yawMag > yawTh * 1.1 && yawToward < -yawTh * 0.5) {
-          // yaw strongly opposes target — flip if nose agrees or is neutral.
-          if (noseToward > -noseTh * 0.3) {
-            DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
-            DIRECTION.calibratedYaw = true;
-          }
-        }
-        if (!DIRECTION.calibratedNose && noseMag > noseTh * 1.1 && noseToward < -noseTh * 0.5) {
-          if (yawToward > -yawTh * 0.3) {
-            DIRECTION.NOSE_LEFT_SIGN = (DIRECTION.NOSE_LEFT_SIGN * -1) as 1 | -1;
-            DIRECTION.calibratedNose = true;
-          }
-        }
-      }
-
-      // Recompute after potential flip.
-      const yawT2 = yawDelta * DIRECTION.YAW_LEFT_SIGN * targetDir;
-      const noseT2 = noseDelta * DIRECTION.NOSE_LEFT_SIGN * targetDir;
-
-      const progress = Math.max(
-        0,
-        Math.min(1, Math.max(yawT2 / yawTh, noseT2 / noseTh)),
-      );
-
-      // Parallax (anti-spoof) — only count toward-target motion.
+      // Parallax (anti-spoof) follows signed-yaw movement only; it cannot pass
+      // a challenge, it can only reject a likely flat replay after yaw passes.
       let pStartZ = state.parallaxStartNoseRelZ;
       let pStartYaw = state.parallaxStartYaw;
-      if (pStartZ === undefined && (yawT2 > yawTh * 0.25 || noseT2 > noseTh * 0.25)) {
+      if (pStartZ === undefined && yawToward > yawTh * 0.25) {
         pStartZ = m.noseRelZ;
         pStartYaw = m.yaw;
       }
       let parallaxOk = state.parallaxOk;
       if (pStartZ !== undefined && pStartYaw !== undefined) {
-        const dz = Math.abs(m.noseRelZ - pStartZ);
-        const dyaw = Math.abs(m.yaw - pStartYaw);
-        if (dyaw > yawTh * 0.6) parallaxOk = dz > TH.PARALLAX_MIN;
+        const dz2 = square(m.noseRelZ - pStartZ);
+        const dyaw2 = square(m.yaw - pStartYaw);
+        if (dyaw2 > square(yawTh * 0.6)) parallaxOk = dz2 > square(TH.PARALLAX_MIN);
       }
-
-      // DIRECTION-AWARE pass condition:
-      //  - at least one signal must exceed its threshold IN the target direction
-      //  - AND no signal may strongly oppose the target (prevents wrong-way pass
-      //    when yaw/nose sign conventions disagree).
-      const yawOK = yawT2 > yawTh;
-      const noseOK = noseT2 > noseTh;
-      const noOpposing = yawT2 > -yawTh * 0.35 && noseT2 > -noseTh * 0.35;
-      const reached = (yawOK || noseOK) && noOpposing;
-
-      // Wrong-way feedback: user produced a clearly wrong-direction movement.
-      const wrongWay =
-        !reached &&
-        (yawT2 < -yawTh * 0.5 || noseT2 < -noseTh * 0.5);
 
       return {
         ...state,
@@ -527,82 +626,39 @@ export function updateChallenge(
         parallaxStartNoseRelZ: pStartZ,
         parallaxStartYaw: pStartYaw,
         parallaxOk,
-        wrongWay,
-        done: reached,
+        wrongWay: !!debug.wrongHint,
+        wrongHint: debug.wrongHint,
+        startedNearNeutral: neutralReady,
+        headDebug: debug,
+        done: debug.pass,
       };
     }
 
     case "nod": {
-      // NOD = VERTICAL ONLY. Use pitch (rotation about X) as primary signal,
-      // fall back to nose vertical offset. Yaw (horizontal) is explicitly
-      // REJECTED so a head turn cannot satisfy a nod prompt.
-      const pitchDelta = m.pitch - baseline.pitch;
-      const noseDyDelta = m.noseDy - baseline.noseDy; // + = nose down
-      const yawDelta = m.yaw - baseline.yaw;
-
-      // Vertical signal: pick whichever vertical channel is moving more.
-      const pitchSigned =
-        Math.abs(pitchDelta) > Math.abs(noseDyDelta) * 1.8
-          ? pitchDelta
-          : noseDyDelta;
-
-      // Axis-dominance gate: vertical motion must DOMINATE horizontal motion.
-      // If |yaw| swings comparably to or more than vertical, this is a turn,
-      // not a nod — refuse to count it.
-      const vertMag = Math.max(Math.abs(pitchDelta), Math.abs(noseDyDelta));
-      const yawMag = Math.abs(yawDelta);
-      const axisOk = vertMag > yawMag * 1.2; // strict: vertical must clearly lead
-
-      const prev = state.nodPitchEma ?? pitchSigned;
-      const ema = prev * 0.5 + pitchSigned * 0.5;
-      const pitchTh = Math.min(TH.PITCH_NOD_ABS, TH.NOSE_NOD_ABS * 2.2) * mul;
-
-      let phase = state.nodPhase ?? "neutral";
-      let count = state.blinkCount ?? 0; // reuse counter slot
-      let lastAt = state.blinkLastCountedAt ?? 0;
-
-      const justCount = () => {
-        count += 1;
-        lastAt = now;
-      };
-
-      // Only advance phase transitions when motion is genuinely vertical.
-      if (axisOk) {
-        if (phase === "neutral") {
-          if (ema > pitchTh) phase = "down";
-          else if (ema < -pitchTh) phase = "up";
-        } else if (phase === "down") {
-          if (ema < pitchTh * 0.3 && now - lastAt > 120) {
-            justCount();
-            phase = "neutral";
-          }
-        } else if (phase === "up") {
-          if (ema > -pitchTh * 0.3 && now - lastAt > 120) {
-            justCount();
-            phase = "neutral";
-          }
-        }
-      }
-
-      // Auto-assist: a single momentary VERTICAL cross counts as done.
-      const momentary = axisOk && Math.abs(ema) > pitchTh;
-      const done = count >= 1 || (mul < 1 && momentary);
-
-      const progress = Math.max(
-        0,
-        Math.min(1, Math.abs(ema) / pitchTh) * (axisOk ? 1 : 0.2),
-      );
-      // wrongWay hint when user is turning sideways instead of nodding.
-      const wrongWay = !done && yawMag > vertMag * 1.2 && yawMag > pitchTh * 0.5;
+      const neutralReady =
+        state.startedNearNeutral === true ||
+        nearNeutral(
+          (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN,
+          m.pitch - baseline.pitch,
+          TH.YAW_TURN_ABS * mul,
+          TH.PITCH_NOD_ABS * mul,
+        );
+      const debug = inspectHeadGesture(m, baseline, "nod", neutralReady, mul);
+      const pitchTh = TH.PITCH_NOD_ABS * mul;
+      const pitchProgress = debug.pitchChange > 0 ? debug.pitchChange / pitchTh : -debug.pitchChange / pitchTh;
+      const progress = Math.max(0, Math.min(1, pitchProgress));
       return {
         ...state,
         poseProgress: progress,
-        nodPhase: phase,
-        nodPitchEma: ema,
-        blinkCount: count,
-        blinkLastCountedAt: lastAt,
-        wrongWay,
-        done,
+        nodPhase: debug.pass ? "neutral" : state.nodPhase,
+        nodPitchEma: debug.pitchChange,
+        blinkCount: debug.pass ? 1 : state.blinkCount ?? 0,
+        blinkLastCountedAt: debug.pass ? now : state.blinkLastCountedAt,
+        wrongWay: !!debug.wrongHint,
+        wrongHint: debug.wrongHint,
+        startedNearNeutral: neutralReady,
+        headDebug: debug,
+        done: debug.pass,
       };
     }
 
