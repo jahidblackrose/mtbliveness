@@ -121,6 +121,16 @@ function LiveFaceAI() {
   const [blinkTick, setBlinkTick] = useState(0);
   const stepRef = useRef<Step>("start");
 
+  // ── MediaRecorder rolling buffer (last ~10s) ──
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderMimeRef = useRef<string | undefined>(undefined);
+  const chunksRef = useRef<VideoChunk[]>([]);
+  const [videoSupported, setVideoSupported] = useState(true);
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const sessionMetaRef = useRef<{ sessionId: string; startedAt: number } | null>(null);
+
   const framingHoldStartRef = useRef<number | null>(null);
 
   const calibAccRef = useRef<CalibAccumulator>(emptyAccumulator());
