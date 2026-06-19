@@ -5,10 +5,11 @@ import {
   FilesetResolver,
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
-import { Camera, CheckCircle2, Languages, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   type ChallengeState,
+  type ChallengeKind,
   type Baseline,
   type FaceMetrics,
   type CalibAccumulator,
@@ -21,6 +22,9 @@ import {
   accumulate,
   finalizeBaseline,
   emptyAccumulator,
+  setEasyMode,
+  EASY,
+  TH,
   SpoofGuard,
 } from "@/lib/liveness";
 import {
@@ -47,7 +51,11 @@ export const Route = createFileRoute("/liveface")({
 
 type Step = "start" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error";
 
-const CHALLENGE_TIMEOUT_MS = 6_000;
+const CHALLENGE_TIMEOUT_MS = 20_000;
+const EASY_CHALLENGE_TIMEOUT_MS = 30_000;
+const SESSION_TIMEOUT_MS = 120_000;
+const MAX_ATTEMPTS = 3;
+const PROMPT_READ_DELAY_MS = 500;
 const CHALLENGE_BREATHER_MS = 400;
 const FRAMING_HOLD_MS = 500;
 const CALIBRATION_MS = 1500;
@@ -106,6 +114,35 @@ function LiveFaceAI() {
 
   const captureBufRef = useRef<{ ts: number; brightness: number; centered: boolean }[]>([]);
   const spoofRef = useRef<SpoofGuard>(new SpoofGuard());
+
+  // ── New: pause / soft-timeout / attempts / easy mode / fps / dev panel
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  const [softTimeoutIdx, setSoftTimeoutIdx] = useState<number | null>(null);
+  const softTimeoutRef = useRef<number | null>(null);
+  useEffect(() => { softTimeoutRef.current = softTimeoutIdx; }, [softTimeoutIdx]);
+
+  const attemptsRef = useRef<number[]>([]); // attempts per challenge index
+  const [easyMode, setEasyModeState] = useState(false);
+  const [hintText, setHintText] = useState<string>("");
+  const sessionStartRef = useRef<number>(0);
+  const challengeRunningMsRef = useRef<number>(0);
+  const lastTickRef = useRef<number>(0);
+
+  const [fps, setFps] = useState(0);
+  const fpsAccumRef = useRef<{ frames: number; lastReport: number }>({ frames: 0, lastReport: 0 });
+
+  const [devOpen, setDevOpen] = useState(false);
+  const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
+
+  const currentTimeoutMs = easyMode ? EASY_CHALLENGE_TIMEOUT_MS : CHALLENGE_TIMEOUT_MS;
+  const currentTimeoutRef = useRef(CHALLENGE_TIMEOUT_MS);
+  useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
+
+  const hintKeyFor = (k: ChallengeKind) =>
+    k === "blink" ? "hintBlink" : k === "smile" ? "hintSmile" : k === "nod" ? "hintNod" : "hintTurn";
 
   useEffect(() => {
     stepRef.current = step;
@@ -213,6 +250,14 @@ function LiveFaceAI() {
       setCalibProgress(0);
       captureBufRef.current = [];
       spoofRef.current = new SpoofGuard();
+      attemptsRef.current = [];
+      setEasyModeState(false);
+      setEasyMode(false);
+      setPaused(false);
+      setSoftTimeoutIdx(null);
+      setHintText("");
+      challengeRunningMsRef.current = 0;
+      sessionStartRef.current = performance.now();
       setStep("framing");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -238,14 +283,39 @@ function LiveFaceAI() {
     const now = performance.now();
     const initial = chosen.map((k) => newChallengeState(k, now));
     challengesRef.current = initial;
+    attemptsRef.current = initial.map(() => 0);
     setChallengeView(initial);
     setActiveIdx(0);
     challengeStartRef.current = now;
     challengePromptedAtRef.current = now;
     breatherUntilRef.current = 0;
+    challengeRunningMsRef.current = 0;
     setTimeLeft(CHALLENGE_TIMEOUT_MS);
+    setHintText("");
     setStep("liveness");
   }, []);
+
+  const tryAgainCurrent = useCallback(() => {
+    const idx = softTimeoutRef.current;
+    if (idx == null) return;
+    const cur = challengesRef.current[idx];
+    if (!cur) return;
+    const now = performance.now();
+    challengesRef.current[idx] = newChallengeState(cur.kind, now);
+    setChallengeView([...challengesRef.current]);
+    challengeStartRef.current = now;
+    challengePromptedAtRef.current = now;
+    challengeRunningMsRef.current = 0;
+    setTimeLeft(currentTimeoutRef.current);
+    setBlinkMeter(0);
+    setSmileMeter(0);
+    setPoseMeter(0);
+    setPaused(false);
+    setSoftTimeoutIdx(null);
+  }, []);
+
+  const togglePause = useCallback(() => setPaused((p) => !p), []);
+
 
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
@@ -268,7 +338,18 @@ function LiveFaceAI() {
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
+      const dt = lastTs < 0 ? 0 : ts - lastTs;
       lastTs = ts;
+
+      // FPS readout (1Hz)
+      const fa = fpsAccumRef.current;
+      fa.frames += 1;
+      if (!fa.lastReport) fa.lastReport = ts;
+      if (ts - fa.lastReport > 1000) {
+        setFps(Math.round((fa.frames * 1000) / (ts - fa.lastReport)));
+        fa.frames = 0;
+        fa.lastReport = ts;
+      }
 
       let result: FaceLandmarkerResult;
       try {
@@ -344,7 +425,10 @@ function LiveFaceAI() {
         }
       } else if (currentStep === "liveness") {
         const baseline = baselineRef.current;
-        if (m && baseline) {
+        const isPaused = pausedRef.current;
+        const inSoftTimeout = softTimeoutRef.current != null;
+
+        if (m && baseline && !isPaused && !inSoftTimeout) {
           spoofRef.current.push(m.fingerprint, brightness);
           const spoof = spoofRef.current.check(m, baseline);
           if (spoof) {
@@ -361,34 +445,49 @@ function LiveFaceAI() {
           );
         }
 
-        if (g.ok && m && baseline && ts >= breatherUntilRef.current) {
-          const idx = challengesRef.current.findIndex((c) => !c.done);
-          if (idx === -1) {
-            if (!captureScheduled) {
-              captureScheduled = true;
-              let n = 2;
-              setCountdown(n);
-              const iv = window.setInterval(() => {
-                n -= 1;
-                if (n <= 0) {
-                  window.clearInterval(iv);
-                  setCountdown(null);
-                  setFlash(true);
-                  setTimeout(() => setFlash(false), 200);
-                  const recentOk = captureBufRef.current.filter((s) => s.centered).length;
-                  if (recentOk >= 3 && stepRef.current === "liveness") capture();
-                  else {
-                    captureScheduled = false;
-                    framingHoldStartRef.current = null;
-                    setStep("framing");
-                  }
-                } else {
-                  setCountdown(n);
+        const idx = challengesRef.current.findIndex((c) => !c.done);
+
+        // Detection + timer only run when actively engaged.
+        const canRun =
+          !isPaused &&
+          !inSoftTimeout &&
+          g.ok &&
+          m &&
+          baseline &&
+          ts >= breatherUntilRef.current;
+
+        if (canRun && idx === -1) {
+          if (!captureScheduled) {
+            captureScheduled = true;
+            let n = 2;
+            setCountdown(n);
+            const iv = window.setInterval(() => {
+              n -= 1;
+              if (n <= 0) {
+                window.clearInterval(iv);
+                setCountdown(null);
+                setFlash(true);
+                setTimeout(() => setFlash(false), 200);
+                const recentOk = captureBufRef.current.filter((s) => s.centered).length;
+                if (recentOk >= 3 && stepRef.current === "liveness") capture();
+                else {
+                  captureScheduled = false;
+                  framingHoldStartRef.current = null;
+                  setStep("framing");
                 }
-              }, 1000);
-            }
-          } else {
-            const sinceShown = ts - challengePromptedAtRef.current;
+              } else {
+                setCountdown(n);
+              }
+            }, 1000);
+          }
+        } else if (canRun && idx !== -1 && m && baseline) {
+          const sinceShown = ts - challengePromptedAtRef.current;
+          if (sinceShown >= PROMPT_READ_DELAY_MS) {
+            // Accumulate active running time (only while engaged).
+            challengeRunningMsRef.current += dt;
+            const remaining = Math.max(0, currentTimeoutRef.current - challengeRunningMsRef.current);
+            setTimeLeft(remaining);
+
             if (sinceShown >= PROMPT_REACTION_MIN_MS) {
               const prev = challengesRef.current[idx];
               const updated = updateChallenge(prev, m, baseline, ts);
@@ -396,7 +495,6 @@ function LiveFaceAI() {
               challengesRef.current[idx] = updated;
               setPoseMeter(updated.poseProgress ?? 0);
 
-              // blink tick animation
               if (
                 updated.kind === "blink" &&
                 updated.blinkJustCountedAt &&
@@ -421,29 +519,54 @@ function LiveFaceAI() {
                   setActiveIdx(nextIdx);
                   challengeStartRef.current = performance.now();
                   challengePromptedAtRef.current = performance.now();
-                  setTimeLeft(CHALLENGE_TIMEOUT_MS);
+                  challengeRunningMsRef.current = 0;
+                  setTimeLeft(currentTimeoutRef.current);
                   setBlinkMeter(0);
                   setSmileMeter(0);
                   setPoseMeter(0);
+                  setHintText("");
                 }, CHALLENGE_BREATHER_MS);
               } else {
                 setChallengeView([...challengesRef.current]);
               }
             }
-          }
-        }
 
-        const activeIndex = challengesRef.current.findIndex((c) => !c.done);
-        if (activeIndex !== -1 && ts >= breatherUntilRef.current) {
-          const elapsed = ts - challengeStartRef.current;
-          const remaining = Math.max(0, CHALLENGE_TIMEOUT_MS - elapsed);
-          setTimeLeft(remaining);
-          if (remaining === 0) {
-            fail(t("timedOut", langRef.current));
-            return;
+            // Soft timeout — DO NOT hard fail.
+            if (remaining === 0) {
+              const a = (attemptsRef.current[idx] ?? 0) + 1;
+              attemptsRef.current[idx] = a;
+              const cur = challengesRef.current[idx];
+              const L = langRef.current;
+
+              // Auto-hint after first timeout on this challenge.
+              setHintText(t(hintKeyFor(cur.kind) as Parameters<typeof t>[0], L));
+
+              // Enable easy mode if same challenge failed ≥ 2 times.
+              if (a >= 2 && !EASY.on) {
+                setEasyMode(true);
+                setEasyModeState(true);
+              }
+
+              if (a >= MAX_ATTEMPTS) {
+                // If at least 2 challenges already passed, accept and proceed.
+                const passed = challengesRef.current.filter((c) => c.done).length;
+                if (passed >= 2) {
+                  challengesRef.current.forEach((c, i) => {
+                    if (i >= idx) challengesRef.current[i] = { ...c, done: true };
+                  });
+                  setChallengeView([...challengesRef.current]);
+                  challengeRunningMsRef.current = 0;
+                  return;
+                }
+                fail(t("failed", L));
+                return;
+              }
+              setSoftTimeoutIdx(idx);
+            }
           }
         }
       }
+
 
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -508,16 +631,29 @@ function LiveFaceAI() {
             centered={centered}
             countdown={countdown}
             timeLeft={timeLeft}
+            timeoutMs={currentTimeoutMs}
             flash={flash}
             blinkTick={blinkTick}
             calibProgress={calibProgress}
             blinkMeter={blinkMeter}
             smileMeter={smileMeter}
             poseMeter={poseMeter}
+            paused={paused}
+            onTogglePause={togglePause}
+            softTimeoutIdx={softTimeoutIdx}
+            onTryAgain={tryAgainCurrent}
+            attempts={softTimeoutIdx != null ? attemptsRef.current[softTimeoutIdx] ?? 0 : 0}
+            hintText={hintText}
+            easyMode={easyMode}
+            fps={fps}
+            isDev={isDev}
+            devOpen={devOpen}
+            onToggleDev={() => setDevOpen((v) => !v)}
             onCancel={reset}
             tx={tx}
           />
         )}
+
         {step === "result" && photoUrl && (
           <ResultScreen photoUrl={photoUrl} onRetake={retake} onConfirm={reset} tx={tx} />
         )}
@@ -611,12 +747,24 @@ function LivenessScreen({
   centered,
   countdown,
   timeLeft,
+  timeoutMs,
   flash,
   blinkTick,
   calibProgress,
   blinkMeter,
   smileMeter,
   poseMeter,
+  paused,
+  onTogglePause,
+  softTimeoutIdx,
+  onTryAgain,
+  attempts,
+  hintText,
+  easyMode,
+  fps,
+  isDev,
+  devOpen,
+  onToggleDev,
   onCancel,
   tx,
 }: {
@@ -630,19 +778,34 @@ function LivenessScreen({
   centered: boolean;
   countdown: number | null;
   timeLeft: number;
+  timeoutMs: number;
   flash: boolean;
   blinkTick: number;
   calibProgress: number;
   blinkMeter: number;
   smileMeter: number;
   poseMeter: number;
+  paused: boolean;
+  onTogglePause: () => void;
+  softTimeoutIdx: number | null;
+  onTryAgain: () => void;
+  attempts: number;
+  hintText: string;
+  easyMode: boolean;
+  fps: number;
+  isDev: boolean;
+  devOpen: boolean;
+  onToggleDev: () => void;
   onCancel: () => void;
   tx: Tx;
 }) {
   const active = challenges[activeIdx];
   const totalSteps = challenges.length || 3;
   const stepNum = phase === "liveness" ? Math.min(activeIdx + 1, totalSteps) : 0;
-  const timePct = Math.max(0, Math.min(100, (timeLeft / CHALLENGE_TIMEOUT_MS) * 100));
+  const timePct = Math.max(0, Math.min(100, (timeLeft / Math.max(1, timeoutMs)) * 100));
+  const secondsLeft = Math.ceil(timeLeft / 1000);
+  const amber = phase === "liveness" && timeLeft > 0 && timeLeft <= 5000;
+  const inSoft = softTimeoutIdx != null;
 
   let headerLabel = "";
   if (phase === "framing") headerLabel = tx("framing");
@@ -655,7 +818,6 @@ function LivenessScreen({
   else if (active) instruction = tx(CHALLENGE_KEY[active.kind]);
   else instruction = tx("allSet");
 
-  // Per-active counter line + meter content
   let meterLine: string | null = null;
   let meterValue = 0;
   if (phase === "liveness" && active) {
@@ -674,14 +836,42 @@ function LivenessScreen({
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between text-xs text-zinc-400">
-        <span>{headerLabel}</span>
-        <button
-          onClick={onCancel}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
-          aria-label={tx("cancel")}
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" /> {tx("cancel")}
-        </button>
+        <span className="flex items-center gap-2">
+          {headerLabel}
+          {easyMode && (
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300 ring-1 ring-amber-400/30">
+              {tx("easyModeOn")}
+            </span>
+          )}
+        </span>
+        <div className="flex items-center gap-1">
+          {phase === "liveness" && (
+            <button
+              onClick={onTogglePause}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
+              aria-label={paused ? tx("resumeBtn") : tx("pauseBtn")}
+            >
+              {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+              <span>{paused ? tx("resumeBtn") : tx("pauseBtn")}</span>
+            </button>
+          )}
+          {isDev && (
+            <button
+              onClick={onToggleDev}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
+              aria-label="Dev"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            onClick={onCancel}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-900"
+            aria-label={tx("cancel")}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" /> {tx("cancel")}
+          </button>
+        </div>
       </div>
 
       <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
@@ -700,15 +890,18 @@ function LivenessScreen({
         />
         <canvas ref={sampleRef} className="hidden" />
 
-        {/* TOP OVERLAY BAND — primary instruction + meter + guidance pinned high so eyes stay near lens */}
+        {/* TOP OVERLAY BAND */}
         <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
           <div className="rounded-2xl bg-black/65 px-4 py-3 backdrop-blur-md ring-1 ring-white/10">
-            {/* timing bar */}
             {(phase === "liveness" || phase === "calibrating") && (
               <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/15">
                 <div
                   className={`h-full transition-[width] duration-100 ${
-                    phase === "calibrating" ? "bg-sky-400" : "bg-emerald-400"
+                    phase === "calibrating"
+                      ? "bg-sky-400"
+                      : amber
+                        ? "bg-amber-400"
+                        : "bg-emerald-400"
                   }`}
                   style={{
                     width: `${phase === "calibrating" ? calibProgress * 100 : timePct}%`,
@@ -720,14 +913,25 @@ function LivenessScreen({
               <span className="text-[10px] uppercase tracking-wider text-white/60">
                 {headerLabel}
               </span>
-              {phase === "liveness" && active?.kind === "blink" && (
-                <span
-                  key={blinkTick}
-                  className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
-                >
-                  {tx("blinkCount", { n: active.blinkCount ?? 0 })}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {phase === "liveness" && !inSoft && (
+                  <span
+                    className={`text-[11px] font-semibold tabular-nums ${
+                      amber ? "text-amber-300" : "text-white/70"
+                    }`}
+                  >
+                    {paused ? tx("paused") : `${secondsLeft}s`}
+                  </span>
+                )}
+                {phase === "liveness" && active?.kind === "blink" && (
+                  <span
+                    key={blinkTick}
+                    className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
+                  >
+                    {tx("blinkCount", { n: active.blinkCount ?? 0 })}
+                  </span>
+                )}
+              </div>
             </div>
             <p className="mt-0.5 text-lg font-semibold leading-tight text-white">
               {instruction}
@@ -739,6 +943,9 @@ function LivenessScreen({
             >
               {guidance}
             </p>
+            {hintText && !inSoft && (
+              <p className="mt-1 text-[11px] text-amber-200/90">{hintText}</p>
+            )}
             {phase === "liveness" && meterLine && active?.kind !== "blink" && (
               <p className="mt-1 text-[11px] text-white/70">{meterLine}</p>
             )}
@@ -749,6 +956,9 @@ function LivenessScreen({
                   style={{ width: `${Math.max(0, Math.min(100, meterValue * 100))}%` }}
                 />
               </div>
+            )}
+            {isDev && (
+              <p className="mt-1 text-[10px] text-white/50">FPS: {fps}</p>
             )}
           </div>
         </div>
@@ -779,7 +989,35 @@ function LivenessScreen({
           </div>
         )}
 
-        {/* Bottom: tiny progress ring/dots only — keep gaze high */}
+        {/* Paused overlay */}
+        {paused && !inSoft && phase === "liveness" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3 rounded-2xl bg-zinc-900/80 px-6 py-5 ring-1 ring-white/10">
+              <Pause className="h-6 w-6 text-white" />
+              <p className="text-sm text-white/80">{tx("paused")}</p>
+              <Button onClick={onTogglePause} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
+                <Play className="mr-2 h-4 w-4" />
+                {tx("resumeBtn")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Soft-timeout overlay (per-challenge retry) */}
+        {inSoft && phase === "liveness" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="w-full max-w-xs space-y-3 rounded-2xl bg-zinc-900/90 px-5 py-5 text-center ring-1 ring-white/10">
+              <p className="text-sm font-semibold text-white">{tx("timeoutSoft")}</p>
+              <p className="text-[11px] text-white/60">{tx("attempt", { n: attempts })}</p>
+              {hintText && <p className="text-xs text-amber-200/90">{hintText}</p>}
+              <Button onClick={onTryAgain} className="w-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400">
+                {tx("tryAgain")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Bottom: progress dots */}
         {phase === "liveness" && (
           <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 p-3">
             {challenges.map((c, i) => (
@@ -797,9 +1035,48 @@ function LivenessScreen({
           </div>
         )}
       </div>
+
+      {isDev && devOpen && <DevPanel />}
     </section>
   );
 }
+
+function DevPanel() {
+  const [, force] = useState(0);
+  const refresh = () => force((n) => n + 1);
+  const Slider = ({ k, min, max, step }: { k: keyof typeof TH; min: number; max: number; step: number }) => (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-zinc-300">
+      <span className="w-44 truncate">{String(k)}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={TH[k] as number}
+        onChange={(e) => {
+          (TH as Record<string, number>)[k as string] = parseFloat(e.target.value);
+          refresh();
+        }}
+        className="flex-1"
+      />
+      <span className="w-12 text-right tabular-nums text-zinc-400">{(TH[k] as number).toFixed(2)}</span>
+    </label>
+  );
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 space-y-1.5">
+      <p className="text-xs font-semibold text-zinc-200">Dev tuning</p>
+      <Slider k="BLINK_HIGH_OFFSET" min={0.15} max={0.6} step={0.01} />
+      <Slider k="BLINK_LOW_OFFSET" min={0.05} max={0.3} step={0.01} />
+      <Slider k="BLINK_REFRACTORY_MS" min={100} max={600} step={10} />
+      <Slider k="SMILE_HOLD_MS" min={100} max={600} step={10} />
+      <Slider k="SMILE_DELTA" min={0.05} max={0.4} step={0.01} />
+      <Slider k="YAW_TURN" min={0.15} max={0.7} step={0.01} />
+      <Slider k="PITCH_NOD" min={0.15} max={0.6} step={0.01} />
+      <Slider k="DEPTH_MIN_RATIO" min={0.2} max={0.9} step={0.05} />
+    </div>
+  );
+}
+
 
 function ResultScreen({
   photoUrl,

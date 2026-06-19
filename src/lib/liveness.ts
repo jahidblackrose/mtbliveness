@@ -262,23 +262,47 @@ export function newChallengeState(kind: ChallengeKind, now: number): ChallengeSt
 }
 
 // Thresholds (mostly derived from baseline at call time).
+// Mutable so a dev tuning panel and easy mode can adjust live.
 export const TH = {
   CENTER_MAX: 0.18,
   FACE_SIZE_MIN: 0.28,
   FACE_SIZE_MAX: 0.9,
   BRIGHT_MIN: 40,
-  YAW_TURN: 0.45,   // ~26° from matrix-derived yaw
+  YAW_TURN: 0.45,
   PITCH_NOD: 0.35,
-  SMILE_HOLD_MS: 280,
-  SMILE_DELTA: 0.18,        // smoothed smile must exceed baseline by this
-  JAW_TALKING: 0.35,        // ignore smile if jaw is wide (talking/yawning)
-  BLINK_HIGH_OFFSET: 0.35,  // closed threshold = baseline + this
-  BLINK_LOW_OFFSET: 0.12,   // open threshold = baseline + this
-  BLINK_EYE_SYM: 0.25,      // both eyes must move together (max diff at peak)
-  BLINK_REFRACTORY_MS: 250, // cooldown before next blink can count
-  DEPTH_MIN_RATIO: 0.55,    // current depthSpread must be ≥ baseline * this
-  PARALLAX_MIN: 0.012,      // noseRelZ change required over a head turn
+  SMILE_HOLD_MS: 250,
+  SMILE_DELTA: 0.18,
+  JAW_TALKING: 0.35,
+  BLINK_HIGH_OFFSET: 0.35,
+  BLINK_LOW_OFFSET: 0.12,
+  BLINK_EYE_SYM: 0.25,
+  BLINK_REFRACTORY_MS: 250,
+  DEPTH_MIN_RATIO: 0.55,
+  PARALLAX_MIN: 0.012,
 };
+
+// Easy mode — relaxes thresholds after repeated failures.
+export const EASY = { on: false };
+export function setEasyMode(on: boolean) {
+  EASY.on = on;
+  if (on) {
+    TH.SMILE_HOLD_MS = 200;
+    TH.SMILE_DELTA = 0.13;
+    TH.BLINK_HIGH_OFFSET = 0.28;
+    TH.BLINK_LOW_OFFSET = 0.10;
+    TH.YAW_TURN = 0.32;
+    TH.PITCH_NOD = 0.26;
+    TH.DEPTH_MIN_RATIO = 0.45;
+  } else {
+    TH.SMILE_HOLD_MS = 250;
+    TH.SMILE_DELTA = 0.18;
+    TH.BLINK_HIGH_OFFSET = 0.35;
+    TH.BLINK_LOW_OFFSET = 0.12;
+    TH.YAW_TURN = 0.45;
+    TH.PITCH_NOD = 0.35;
+    TH.DEPTH_MIN_RATIO = 0.55;
+  }
+}
 
 export function updateChallenge(
   state: ChallengeState,
