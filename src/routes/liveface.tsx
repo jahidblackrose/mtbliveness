@@ -560,9 +560,9 @@ function LiveFaceAI() {
 
 
               if (a >= MAX_ATTEMPTS) {
-                // If at least 2 challenges already passed, accept and proceed.
+                // If at least one challenge already passed, accept and proceed.
                 const passed = challengesRef.current.filter((c) => c.done).length;
-                if (passed >= 2) {
+                if (passed >= 1) {
                   challengesRef.current.forEach((c, i) => {
                     if (i >= idx) challengesRef.current[i] = { ...c, done: true };
                   });
@@ -574,6 +574,7 @@ function LiveFaceAI() {
                 return;
               }
               setSoftTimeoutIdx(idx);
+
             }
           }
         }
