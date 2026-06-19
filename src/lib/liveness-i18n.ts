@@ -51,6 +51,8 @@ export const STRINGS = {
   keepSmiling: { bn: "হাসি ধরে রাখুন…", en: "Keep smiling…" },
   showSmile: { bn: "একটু হাসুন", en: "Show a smile" },
   slowSteady: { bn: "ধীরে স্থিরভাবে", en: "Slow and steady" },
+  nodHint: { bn: "মাথা উপর-নিচ", en: "Up and down" },
+
 
   // Phase headers
   framing: { bn: "ফ্রেমিং", en: "Framing" },
