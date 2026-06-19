@@ -23,6 +23,7 @@ import {
   newChallengeState,
   pickChallenges,
   updateChallenge,
+  inspectHeadGesture,
   avgBrightness,
   accumulate,
   finalizeBaseline,
@@ -176,7 +177,17 @@ function LiveFaceAI() {
   const lastFramingOkRef = useRef(false);
   const captureIntervalRef = useRef<number | null>(null);
 
-  const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
+  const [liveReadout, setLiveReadout] = useState({
+    blink: 0,
+    smile: 0,
+    yaw: 0,
+    pitch: 0,
+    yawChange: 0,
+    pitchChange: 0,
+    dominantAxis: "none",
+    resolved: "none",
+    pass: false,
+  });
   const readoutAccumRef = useRef(0);
 
   // ── Post-pass integrity gate: reference signature + live similarity ──
