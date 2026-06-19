@@ -737,6 +737,19 @@ function LiveFaceAI() {
                   setHintText("");
                 }, CONFIG.CHALLENGE_BREATHER_MS);
               } else {
+                // Surface wrong-way feedback for turn challenges in real time.
+                if (
+                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
+                  updated.wrongWay
+                ) {
+                  setHintText(t("wrongWay", langRef.current));
+                } else if (
+                  (updated.kind === "turnLeft" || updated.kind === "turnRight") &&
+                  !updated.wrongWay &&
+                  hintTextRef.current === t("wrongWay", langRef.current)
+                ) {
+                  setHintText("");
+                }
                 setChallengeView([...challengesRef.current]);
               }
             }
