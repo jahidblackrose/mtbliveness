@@ -295,6 +295,31 @@ export const TH = {
 
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Direction mapping for head-turn (signed). The selfie preview is MIRRORED
+// (CSS scaleX(-1)), so the raw landmark/pose coordinates are NOT mirrored;
+// we map each signal's sign onto the user's perceived LEFT once, in ONE
+// place, and self-calibrate on the first turn if a sign appears inverted.
+// ─────────────────────────────────────────────────────────────────────────────
+export const DIRECTION = {
+  MIRRORED: true,
+  // Sign that (m.yaw - baseline.yaw) takes when the user turns to THEIR LEFT.
+  // MediaPipe pose-matrix yaw (atan2(r10,r00)) is typically negative for a
+  // user's left turn — but device/model variance makes this worth calibrating.
+  YAW_LEFT_SIGN: -1 as 1 | -1,
+  // Sign that (m.noseDx - baseline.noseDx) takes when user turns to their LEFT.
+  // In the unmirrored landmark space, nose moves toward image-right (x↑) when
+  // the user turns their physical left, so +1.
+  NOSE_LEFT_SIGN: 1 as 1 | -1,
+  // Internal: track whether self-calibration ran this session.
+  calibratedYaw: false,
+  calibratedNose: false,
+};
+export function resetDirectionCalibration() {
+  DIRECTION.calibratedYaw = false;
+  DIRECTION.calibratedNose = false;
+}
+
 export const EASY = { on: false };
 export function setEasyMode(on: boolean) {
   EASY.on = on;
