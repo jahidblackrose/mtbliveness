@@ -138,6 +138,19 @@ function LiveFaceAI() {
   const [devOpen, setDevOpen] = useState(false);
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
 
+  // Post-pass capture sequence: success → lookStraight → countdown → capturing
+  type CaptureSeq = "idle" | "success" | "lookStraight" | "countdown" | "capturing";
+  const [captureSeq, setCaptureSeq] = useState<CaptureSeq>("idle");
+  const captureSeqRef = useRef<CaptureSeq>("idle");
+  useEffect(() => { captureSeqRef.current = captureSeq; }, [captureSeq]);
+  const [bigCountdown, setBigCountdown] = useState<number | null>(null);
+  const lookStraightHoldRef = useRef<number | null>(null);
+  const lastFramingOkRef = useRef(false);
+  const captureIntervalRef = useRef<number | null>(null);
+
+  const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
+  const readoutAccumRef = useRef(0);
+
   const currentTimeoutMs = easyMode ? EASY_CHALLENGE_TIMEOUT_MS : CHALLENGE_TIMEOUT_MS;
   const currentTimeoutRef = useRef(CHALLENGE_TIMEOUT_MS);
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
