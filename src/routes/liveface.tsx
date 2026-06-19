@@ -309,6 +309,26 @@ function LiveFaceAI() {
   const capture = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+
+    // Part B: re-verify SAME-PERSON match at the exact capture moment.
+    // Compare the most recent live signature to the locked reference. A
+    // mismatch here means a face swap happened during the countdown ⇒
+    // abort capture entirely and restart from step 1.
+    const ref = referenceSigRef.current;
+    const cur = lastSignatureRef.current;
+    if (ref && cur) {
+      const sim = signatureSimilarity(ref, cur);
+      setLiveSim(sim);
+      if (sim < INTEGRITY.SIM_CAPTURE) {
+        integrityRestart("mismatch");
+        return;
+      }
+    } else if (ref && !cur) {
+      // Reference exists but no face at the capture instant — treat as mismatch.
+      integrityRestart("mismatch");
+      return;
+    }
+
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -339,7 +359,7 @@ function LiveFaceAI() {
       "image/jpeg",
       0.92,
     );
-  }, [assembleVideo, fail]);
+  }, [assembleVideo, fail, integrityRestart]);
 
 
   const setSmoothGuidance = (text: string, now: number) => {
