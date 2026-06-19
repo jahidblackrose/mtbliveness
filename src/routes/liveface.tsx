@@ -495,6 +495,59 @@ function LiveFaceAI() {
 
   const togglePause = useCallback(() => setPaused((p) => !p), []);
 
+  // Part B: integrity failure — restart entire flow from step 1 (framing).
+  // Keeps stream/landmarker alive (cheap), resets all challenge state, and
+  // shows a bilingual hint explaining why.
+  const integrityRestart = useCallback(
+    (kind: "changed" | "mismatch") => {
+      const L = langRef.current;
+      setHintText(t(kind === "changed" ? "faceChanged" : "faceMismatch", L));
+      setIntegrityDecision(kind === "changed" ? "FACE_CHANGED" : "FACE_MISMATCH");
+
+      // Tear down post-pass sequence
+      if (captureIntervalRef.current != null) {
+        window.clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
+      setBigCountdown(null);
+      captureSeqRef.current = "idle";
+      setCaptureSeq("idle");
+      lookStraightHoldRef.current = null;
+
+      // Reset challenge state — passed list cleared (per spec).
+      challengesRef.current = [];
+      setChallengeView([]);
+      setActiveIdx(0);
+      attemptsRef.current = [];
+      framingHoldStartRef.current = null;
+      calibAccRef.current = emptyAccumulator();
+      baselineRef.current = null;
+      setCalibProgress(0);
+      captureBufRef.current = [];
+      spoofRef.current = new SpoofGuard();
+      resetDirectionCalibration();
+
+      // Reset integrity refs
+      refSigSamplesRef.current = [];
+      referenceSigRef.current = null;
+      lastSignatureRef.current = null;
+      setRefSigCaptured(false);
+      setLiveSim(1);
+      integrityFailStartRef.current = null;
+
+      setBlinkMeter(0);
+      setSmileMeter(0);
+      setPoseMeter(0);
+      challengeRunningMsRef.current = 0;
+
+      // Restart rolling video buffer
+      if (streamRef.current) startRecorder(streamRef.current);
+
+      setStep("framing");
+    },
+    [startRecorder],
+  );
+
 
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
