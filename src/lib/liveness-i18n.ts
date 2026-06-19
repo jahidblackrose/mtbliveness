@@ -16,8 +16,12 @@ export const STRINGS = {
   startBtn: { bn: "শুরু করুন", en: "Start verification" },
   step1: { bn: "ক্যামেরার অনুমতি দিন", en: "Allow camera access" },
   step2: { bn: "ফ্রেমের মাঝে মুখ রাখুন", en: "Center your face in the oval" },
-  step3: { bn: "২টি র‍্যান্ডম কাজ সম্পন্ন করুন", en: "Complete 2 randomized challenges" },
+  step3: { bn: "৩টি র‍্যান্ডম কাজ সম্পন্ন করুন", en: "Complete 3 randomized challenges" },
   almostThere: {
+    bn: "প্রায় হয়ে গেছে, আরেকটু",
+    en: "Almost there, a little more",
+  },
+  almost: {
     bn: "প্রায় হয়ে গেছে, আরেকটু",
     en: "Almost there, a little more",
   },
@@ -25,30 +29,43 @@ export const STRINGS = {
     bn: "মুখ ভালোভাবে দেখা যাচ্ছে না, আলো বাড়ান",
     en: "Face not clear, improve lighting",
   },
+  tooDark2: {
+    bn: "আলো বাড়ান, মুখ স্পষ্ট দেখা যাচ্ছে না",
+    en: "More light — your face isn't clear",
+  },
 
   step4: { bn: "ছবি স্বয়ংক্রিয়ভাবে তোলা হবে", en: "We'll auto-capture your photo" },
   loading: { bn: "ডিভাইসে মডেল লোড হচ্ছে…", en: "Loading on-device model…" },
 
   // Challenge names (top band primary instruction)
-  blinkTwice: { bn: "দুইবার চোখের পলক ফেলুন", en: "Blink twice" },
-  smile: { bn: "হাসুন", en: "Smile" },
-  turnLeft: { bn: "মাথা বাঁ দিকে ঘোরান", en: "Turn your head left" },
-  turnRight: { bn: "মাথা ডান দিকে ঘোরান", en: "Turn your head right" },
-  nod: { bn: "মাথা উপর-নিচ করুন", en: "Nod your head" },
+  blinkTwice: { bn: "ধীরে ধীরে দুইবার চোখের পলক ফেলুন", en: "Blink your eyes twice, slowly" },
+  smile: { bn: "ক্যামেরার দিকে তাকিয়ে হাসুন", en: "Smile at the camera" },
+  turnLeft: { bn: "ধীরে মাথা বাঁ দিকে ঘোরান", en: "Slowly turn your head left" },
+  turnRight: { bn: "ধীরে মাথা ডান দিকে ঘোরান", en: "Slowly turn your head right" },
+  nod: { bn: "মাথা একবার উপরে-নিচে করুন", en: "Nod your head up and down once" },
+
+  // Post-pass capture sequence
+  lookStraight: { bn: "সোজা ক্যামেরার দিকে তাকান", en: "Look straight at the camera" },
+  hold: { bn: "স্থির থাকুন", en: "Hold still" },
+  capturing: { bn: "ছবি তোলা হচ্ছে…", en: "Capturing…" },
+  allDone: { bn: "সব ধাপ সম্পন্ন ✓", en: "All steps complete ✓" },
+  stepDone: { bn: "ঠিক আছে ✓", en: "Got it ✓" },
 
   // Guidance (small line)
-  center: { bn: "মুখ ফ্রেমের মাঝে রাখুন", en: "Center your face" },
+  center: { bn: "মুখ ফ্রেমের মাঝে আনুন", en: "Bring your face to the center" },
   onePerson: { bn: "একজন করে আসুন", en: "Only one person at a time" },
   searching: { bn: "মুখ খুঁজছি…", en: "Looking for your face…" },
-  closer: { bn: "একটু কাছে আসুন", en: "Move closer" },
-  back: { bn: "একটু পিছিয়ে যান", en: "Move back" },
-  tooDark: { bn: "আলো বাড়ান", en: "Too dark — find better lighting" },
+  closer: { bn: "একটু কাছে আসুন", en: "Move a little closer" },
+  back: { bn: "একটু পিছিয়ে যান", en: "Move back a little" },
+  tooDark: { bn: "আলো বাড়ান, মুখ স্পষ্ট দেখা যাচ্ছে না", en: "More light — your face isn't clear" },
   straight: { bn: "ক্যামেরার দিকে সরাসরি তাকান", en: "Face the camera straight on" },
   holdStill: { bn: "স্থির থাকুন", en: "Hold still" },
 
   // Counters / meters
-  blinkCount: { bn: "পলক: {n}/2", en: "Blinks: {n}/2" },
-  keepSmiling: { bn: "হাসি ধরে রাখুন…", en: "Keep smiling…" },
+  blinkCount: { bn: "পলক: {n}/২", en: "Blinks: {n}/2" },
+  blinkProgress: { bn: "পলক: {n}/২", en: "Blinks: {n}/2" },
+  keepSmiling: { bn: "হাসি ধরে রাখুন…", en: "Hold your smile…" },
+  smileHold: { bn: "হাসি ধরে রাখুন…", en: "Hold your smile…" },
   showSmile: { bn: "একটু হাসুন", en: "Show a smile" },
   slowSteady: { bn: "ধীরে স্থিরভাবে", en: "Slow and steady" },
   nodHint: { bn: "মাথা উপর-নিচ", en: "Up and down" },

@@ -215,14 +215,18 @@ export const CHALLENGE_LABEL: Record<ChallengeKind, string> = {
 };
 
 export function pickChallenges(): ChallengeKind[] {
-  // 2 challenges total. Always include exactly one head movement (needed
-  // for the parallax/3D check). The other is the easiest non-pose action.
-  const head: ChallengeKind = (["turnLeft", "turnRight", "nod"] as const)[
-    Math.floor(Math.random() * 3)
-  ];
-  const easy: ChallengeKind = Math.random() < 0.5 ? "blink" : "smile";
-  const picked: ChallengeKind[] = [head, easy];
-  if (Math.random() < 0.5) picked.reverse();
+  // 3 challenges total. Always include at least one head movement (parallax
+  // check). The remaining two are easier expression actions. Order randomized
+  // per session as an anti-replay measure.
+  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "nod"];
+  const head = heads[Math.floor(Math.random() * heads.length)];
+  // Two easy actions — blink and smile are both comfortable.
+  const picked: ChallengeKind[] = [head, "blink", "smile"];
+  // Fisher–Yates shuffle for random order.
+  for (let i = picked.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [picked[i], picked[j]] = [picked[j], picked[i]];
+  }
   return picked;
 }
 
