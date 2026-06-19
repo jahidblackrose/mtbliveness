@@ -111,7 +111,7 @@ export const STRINGS = {
 export type StringKey = keyof typeof STRINGS;
 
 export function t(key: StringKey, lang: Lang, vars?: Record<string, string | number>) {
-  let s = STRINGS[key][lang];
+  let s: string = STRINGS[key][lang];
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));
   return s;
 }
