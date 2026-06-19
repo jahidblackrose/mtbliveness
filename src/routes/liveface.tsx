@@ -1053,7 +1053,10 @@ function DevPanel() {
         max={max}
         step={step}
         value={TH[k] as number}
-        onChange={(e) => { (TH[k] as unknown as number) = parseFloat(e.target.value); refresh(); }}
+        onChange={(e) => {
+          (TH as Record<string, number>)[k as string] = parseFloat(e.target.value);
+          refresh();
+        }}
         className="flex-1"
       />
       <span className="w-12 text-right tabular-nums text-zinc-400">{(TH[k] as number).toFixed(2)}</span>
