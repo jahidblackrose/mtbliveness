@@ -48,25 +48,24 @@ function poseFromMatrix(m: Matrix | undefined): { yaw: number; pitch: number; ro
 // Per-frame face metrics
 // ─────────────────────────────────────────────────────────────────────────────
 export type FaceMetrics = {
-  // blendshapes
   blinkLeft: number;
   blinkRight: number;
   blinkAvg: number;
+  blinkMax: number;
   smileLeft: number;
   smileRight: number;
   smileAvg: number;
+  smileMax: number;
   jawOpen: number;
-  // pose (radians from matrix; falls back to landmark estimate)
   yaw: number;
   pitch: number;
   roll: number;
-  // framing
   centerOffset: number;
   faceSize: number;
-  // depth (pseudo) — variance of normalized z across key landmarks
+  noseDx: number; // nose offset from face center, normalized by face width
+  noseDy: number; // nose offset from face center, normalized by face height
   depthSpread: number;
-  noseRelZ: number; // nose z minus mean of cheek/ear z (more negative = closer)
-  // raw landmark fingerprint for freeze detection
+  noseRelZ: number;
   fingerprint: number;
 };
 
@@ -82,15 +81,14 @@ export function computeMetrics(
   const jawOpen = bs(blendshapes, "jawOpen");
 
   let pose = poseFromMatrix(matrix);
-  // Fallback yaw via nose vs eye midpoint if matrix is empty.
   if (pose.yaw === 0 && pose.pitch === 0 && pose.roll === 0) {
     const eyeMidX = (lm[LEFT_EYE_OUTER].x + lm[RIGHT_EYE_OUTER].x) / 2;
-    const faceWidth = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
+    const faceW = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
     const eyeMidY = (lm[LEFT_EYE_OUTER].y + lm[RIGHT_EYE_OUTER].y) / 2;
-    const faceHeight = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
+    const faceH = Math.max(0.0001, lm[FACE_BOTTOM].y - lm[FACE_TOP].y);
     pose = {
-      yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceWidth) * 2,
-      pitch: ((lm[NOSE_TIP].y - eyeMidY) / faceHeight) * 2,
+      yaw: ((lm[NOSE_TIP].x - eyeMidX) / faceW) * 2,
+      pitch: ((lm[NOSE_TIP].y - eyeMidY) / faceH) * 2,
       roll: 0,
     };
   }
@@ -98,18 +96,14 @@ export function computeMetrics(
   const cx = (lm[FACE_LEFT].x + lm[FACE_RIGHT].x) / 2;
   const cy = (lm[FACE_TOP].y + lm[FACE_BOTTOM].y) / 2;
   const centerOffset = Math.hypot(cx - 0.5, cy - 0.5);
+  const faceWidth = Math.max(0.0001, lm[FACE_RIGHT].x - lm[FACE_LEFT].x);
   const faceSize = lm[FACE_BOTTOM].y - lm[FACE_TOP].y;
+  const noseDx = (lm[NOSE_TIP].x - cx) / faceWidth;
+  const noseDy = (lm[NOSE_TIP].y - cy) / Math.max(0.0001, faceSize);
 
-  // Depth structure across key points (z is in camera space; smaller = closer).
   const zs = [
-    lm[NOSE_TIP].z,
-    lm[LEFT_EYE_OUTER].z,
-    lm[RIGHT_EYE_OUTER].z,
-    lm[LEFT_CHEEK].z,
-    lm[RIGHT_CHEEK].z,
-    lm[FACE_LEFT].z,
-    lm[FACE_RIGHT].z,
-    lm[CHIN].z,
+    lm[NOSE_TIP].z, lm[LEFT_EYE_OUTER].z, lm[RIGHT_EYE_OUTER].z,
+    lm[LEFT_CHEEK].z, lm[RIGHT_CHEEK].z, lm[FACE_LEFT].z, lm[FACE_RIGHT].z, lm[CHIN].z,
   ];
   const meanZ = zs.reduce((a, b) => a + b, 0) / zs.length;
   const variance = zs.reduce((a, z) => a + (z - meanZ) ** 2, 0) / zs.length;
@@ -118,30 +112,21 @@ export function computeMetrics(
     (lm[LEFT_CHEEK].z + lm[RIGHT_CHEEK].z + lm[FACE_LEFT].z + lm[FACE_RIGHT].z) / 4;
   const noseRelZ = lm[NOSE_TIP].z - meanCheekEar;
 
-  // Cheap fingerprint of geometry to detect frozen/replayed frames.
   const fp =
-    lm[NOSE_TIP].x * 1000 +
-    lm[NOSE_TIP].y * 1000 +
-    lm[LEFT_EYE_OUTER].x * 100 +
-    lm[RIGHT_EYE_OUTER].x * 100 +
-    lm[CHIN].y * 10;
+    lm[NOSE_TIP].x * 1000 + lm[NOSE_TIP].y * 1000 +
+    lm[LEFT_EYE_OUTER].x * 100 + lm[RIGHT_EYE_OUTER].x * 100 + lm[CHIN].y * 10;
 
   return {
-    blinkLeft,
-    blinkRight,
+    blinkLeft, blinkRight,
     blinkAvg: (blinkLeft + blinkRight) / 2,
-    smileLeft,
-    smileRight,
+    blinkMax: Math.max(blinkLeft, blinkRight),
+    smileLeft, smileRight,
     smileAvg: (smileLeft + smileRight) / 2,
+    smileMax: Math.max(smileLeft, smileRight),
     jawOpen,
-    yaw: pose.yaw,
-    pitch: pose.pitch,
-    roll: pose.roll,
-    centerOffset,
-    faceSize,
-    depthSpread,
-    noseRelZ,
-    fingerprint: fp,
+    yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll,
+    centerOffset, faceSize, noseDx, noseDy,
+    depthSpread, noseRelZ, fingerprint: fp,
   };
 }
 
@@ -154,6 +139,8 @@ export type Baseline = {
   jawNeutral: number;
   yaw: number;
   pitch: number;
+  noseDx: number;
+  noseDy: number;
   depthSpread: number;
   noseRelZ: number;
   faceSize: number;
@@ -167,6 +154,8 @@ export function emptyAccumulator() {
     jaw: 0,
     yaw: 0,
     pitch: 0,
+    noseDx: 0,
+    noseDy: 0,
     depthSpread: 0,
     noseRelZ: 0,
     faceSize: 0,
@@ -176,11 +165,14 @@ export type CalibAccumulator = ReturnType<typeof emptyAccumulator>;
 
 export function accumulate(acc: CalibAccumulator, m: FaceMetrics) {
   acc.n += 1;
-  acc.blink += m.blinkAvg;
-  acc.smile += m.smileAvg;
+  // Use MAX for blink/smile to match runtime signal (catches one-eye blinks etc).
+  acc.blink += m.blinkMax;
+  acc.smile += m.smileMax;
   acc.jaw += m.jawOpen;
   acc.yaw += m.yaw;
   acc.pitch += m.pitch;
+  acc.noseDx += m.noseDx;
+  acc.noseDy += m.noseDy;
   acc.depthSpread += m.depthSpread;
   acc.noseRelZ += m.noseRelZ;
   acc.faceSize += m.faceSize;
@@ -188,12 +180,21 @@ export function accumulate(acc: CalibAccumulator, m: FaceMetrics) {
 
 export function finalizeBaseline(acc: CalibAccumulator): Baseline {
   const n = Math.max(1, acc.n);
+  // Sanity check: a "neutral" baseline that's already high means the user
+  // wasn't actually neutral during calibration. Discard and fall back to
+  // safe defaults so absolute thresholds remain achievable.
+  let blinkOpen = acc.blink / n;
+  let smileNeutral = acc.smile / n;
+  if (blinkOpen > 0.3) blinkOpen = 0.1;
+  if (smileNeutral > 0.25) smileNeutral = 0.05;
   return {
-    blinkOpen: acc.blink / n,
-    smileNeutral: acc.smile / n,
+    blinkOpen,
+    smileNeutral,
     jawNeutral: acc.jaw / n,
     yaw: acc.yaw / n,
     pitch: acc.pitch / n,
+    noseDx: acc.noseDx / n,
+    noseDy: acc.noseDy / n,
     depthSpread: acc.depthSpread / n,
     noseRelZ: acc.noseRelZ / n,
     faceSize: acc.faceSize / n,
@@ -261,47 +262,78 @@ export function newChallengeState(kind: ChallengeKind, now: number): ChallengeSt
   return base;
 }
 
-// Thresholds (mostly derived from baseline at call time).
-// Mutable so a dev tuning panel and easy mode can adjust live.
+// Thresholds — mutable so the dev panel and easy mode can tune them live.
+// Two-track design: a RELATIVE-to-baseline threshold AND an ABSOLUTE fallback.
+// A signal triggers if EITHER fires, so a bad calibration can't make a
+// challenge impossible.
 export const TH = {
   CENTER_MAX: 0.18,
   FACE_SIZE_MIN: 0.28,
   FACE_SIZE_MAX: 0.9,
   BRIGHT_MIN: 40,
-  YAW_TURN: 0.45,
-  PITCH_NOD: 0.35,
-  SMILE_HOLD_MS: 250,
-  SMILE_DELTA: 0.18,
-  JAW_TALKING: 0.35,
-  BLINK_HIGH_OFFSET: 0.35,
-  BLINK_LOW_OFFSET: 0.12,
-  BLINK_EYE_SYM: 0.25,
-  BLINK_REFRACTORY_MS: 250,
+  // Head turn — gentle (~12.6°) and momentary is enough.
+  YAW_TURN: 0.22,
+  YAW_TURN_ABS: 0.22,
+  NOSE_TURN_ABS: 0.18, // |noseDx| fallback (face-width fraction)
+  // Nod
+  PITCH_NOD: 0.18,
+  PITCH_NOD_ABS: 0.18,
+  NOSE_NOD_ABS: 0.10, // |noseDy delta| fallback (face-height fraction)
+  // Smile
+  SMILE_HOLD_MS: 180,
+  SMILE_DELTA: 0.10,
+  SMILE_ABS: 0.30,
+  JAW_TALKING: 0.6,
+  // Blink — single peak counts, short refractory.
+  BLINK_HIGH_OFFSET: 0.20,
+  BLINK_LOW_OFFSET: 0.08,
+  BLINK_ABS: 0.45,
+  BLINK_REFRACTORY_MS: 180,
+  // Spoof
   DEPTH_MIN_RATIO: 0.55,
   PARALLAX_MIN: 0.012,
+  // Auto-assist after a clearly-attempting user stalls.
+  ASSIST_AFTER_MS: 3000,
+  ASSIST_FACTOR: 0.7,
 };
 
-// Easy mode — relaxes thresholds after repeated failures.
 export const EASY = { on: false };
 export function setEasyMode(on: boolean) {
   EASY.on = on;
   if (on) {
-    TH.SMILE_HOLD_MS = 200;
-    TH.SMILE_DELTA = 0.13;
-    TH.BLINK_HIGH_OFFSET = 0.28;
-    TH.BLINK_LOW_OFFSET = 0.10;
-    TH.YAW_TURN = 0.32;
-    TH.PITCH_NOD = 0.26;
+    TH.SMILE_HOLD_MS = 120;
+    TH.SMILE_DELTA = 0.07;
+    TH.SMILE_ABS = 0.22;
+    TH.BLINK_HIGH_OFFSET = 0.15;
+    TH.BLINK_LOW_OFFSET = 0.06;
+    TH.BLINK_ABS = 0.35;
+    TH.YAW_TURN = 0.16;
+    TH.YAW_TURN_ABS = 0.16;
+    TH.NOSE_TURN_ABS = 0.13;
+    TH.PITCH_NOD = 0.13;
+    TH.PITCH_NOD_ABS = 0.13;
+    TH.NOSE_NOD_ABS = 0.07;
     TH.DEPTH_MIN_RATIO = 0.45;
   } else {
-    TH.SMILE_HOLD_MS = 250;
-    TH.SMILE_DELTA = 0.18;
-    TH.BLINK_HIGH_OFFSET = 0.35;
-    TH.BLINK_LOW_OFFSET = 0.12;
-    TH.YAW_TURN = 0.45;
-    TH.PITCH_NOD = 0.35;
+    TH.SMILE_HOLD_MS = 180;
+    TH.SMILE_DELTA = 0.10;
+    TH.SMILE_ABS = 0.30;
+    TH.BLINK_HIGH_OFFSET = 0.20;
+    TH.BLINK_LOW_OFFSET = 0.08;
+    TH.BLINK_ABS = 0.45;
+    TH.YAW_TURN = 0.22;
+    TH.YAW_TURN_ABS = 0.22;
+    TH.NOSE_TURN_ABS = 0.18;
+    TH.PITCH_NOD = 0.18;
+    TH.PITCH_NOD_ABS = 0.18;
+    TH.NOSE_NOD_ABS = 0.10;
     TH.DEPTH_MIN_RATIO = 0.55;
   }
+}
+
+// Auto-assist factor based on how long the user has been attempting.
+function assistMul(state: ChallengeState, now: number) {
+  return now - state.startedAt > TH.ASSIST_AFTER_MS ? TH.ASSIST_FACTOR : 1;
 }
 
 export function updateChallenge(
@@ -311,35 +343,37 @@ export function updateChallenge(
   now: number,
 ): ChallengeState {
   if (state.done) return state;
+  const mul = assistMul(state, now);
 
   switch (state.kind) {
     case "blink": {
-      // Light EMA so peaks survive on low FPS.
-      const prev = state.blinkEma ?? m.blinkAvg;
-      const ema = prev * 0.4 + m.blinkAvg * 0.6;
+      // Use MAX of the two eyes — averaging hides a real blink.
+      const signal = m.blinkMax;
+      const prev = state.blinkEma ?? signal;
+      const ema = prev * 0.4 + signal * 0.6;
 
-      const lowThresh = baseline.blinkOpen + TH.BLINK_LOW_OFFSET;
-      const highThresh = baseline.blinkOpen + TH.BLINK_HIGH_OFFSET;
-      const eyesSymmetric = Math.abs(m.blinkLeft - m.blinkRight) < TH.BLINK_EYE_SYM;
+      // Trigger close on EITHER baseline-relative OR absolute floor.
+      const highRel = baseline.blinkOpen + TH.BLINK_HIGH_OFFSET * mul;
+      const highAbs = TH.BLINK_ABS * mul;
+      const lowRel = baseline.blinkOpen + TH.BLINK_LOW_OFFSET * mul;
+      const lowAbs = Math.max(0.15, TH.BLINK_ABS * mul - 0.15);
 
       let phase = state.blinkPhase ?? "open";
       let count = state.blinkCount ?? 0;
       let lastCountedAt = state.blinkLastCountedAt ?? 0;
       let justCountedAt = state.blinkJustCountedAt;
 
-      if (phase === "open" && ema > highThresh && eyesSymmetric) {
+      const isClosed = ema > highRel || ema > highAbs || signal > highAbs;
+      const isOpen = ema < lowRel && ema < lowAbs;
+
+      if (phase === "open" && isClosed) {
         phase = "closed";
-      } else if (
-        phase === "closed" &&
-        ema < lowThresh &&
-        now - lastCountedAt > TH.BLINK_REFRACTORY_MS
-      ) {
-        phase = "open";
-        count += 1;
-        lastCountedAt = now;
-        justCountedAt = now;
-      } else if (phase === "closed" && ema < lowThresh) {
-        // open up but suppressed by refractory
+      } else if (phase === "closed" && isOpen) {
+        if (now - lastCountedAt > TH.BLINK_REFRACTORY_MS) {
+          count += 1;
+          lastCountedAt = now;
+          justCountedAt = now;
+        }
         phase = "open";
       }
       return {
@@ -354,15 +388,21 @@ export function updateChallenge(
     }
 
     case "smile": {
-      const prev = state.smileEma ?? m.smileAvg;
-      const ema = prev * 0.6 + m.smileAvg * 0.4;
+      // MAX side — many smiles are asymmetric.
+      const signal = m.smileMax;
+      const prev = state.smileEma ?? signal;
+      const ema = prev * 0.6 + signal * 0.4;
       const rise = ema - baseline.smileNeutral;
-      const intensity = Math.max(0, Math.min(1, rise / (TH.SMILE_DELTA * 1.5)));
+      const deltaTh = TH.SMILE_DELTA * mul;
+      const absTh = TH.SMILE_ABS * mul;
+      const intensity = Math.max(
+        0,
+        Math.min(1, Math.max(rise / (deltaTh * 1.5), ema / (absTh * 1.2))),
+      );
 
-      const smiling =
-        rise > TH.SMILE_DELTA &&
-        m.jawOpen < TH.JAW_TALKING &&
-        ema > m.jawOpen; // smile must dominate over jaw
+      // Smile passes on EITHER rise-above-neutral OR absolute floor.
+      // Only reject if jaw is VERY open (clearly talking/yawning).
+      const smiling = (rise > deltaTh || ema > absTh) && m.jawOpen < TH.JAW_TALKING;
 
       let holdStart = state.smileHoldStart;
       if (smiling) {
@@ -384,13 +424,20 @@ export function updateChallenge(
     case "turnRight": {
       // Mirrored video: user's left ↔ image right.
       const targetSign = state.kind === "turnLeft" ? 1 : -1;
-      const yawRel = m.yaw - baseline.yaw;
-      const progress = Math.max(0, Math.min(1, (yawRel * targetSign) / TH.YAW_TURN));
+      const yawRel = (m.yaw - baseline.yaw) * targetSign;
+      const noseRel = (m.noseDx - baseline.noseDx) * targetSign;
 
-      // Parallax: capture initial noseRelZ when user begins turning.
+      const yawTh = TH.YAW_TURN_ABS * mul;
+      const noseTh = TH.NOSE_TURN_ABS * mul;
+      const progress = Math.max(
+        0,
+        Math.min(1, Math.max(yawRel / yawTh, noseRel / noseTh)),
+      );
+
+      // Parallax (anti-spoof): unchanged but use whichever signal is moving.
       let pStartZ = state.parallaxStartNoseRelZ;
       let pStartYaw = state.parallaxStartYaw;
-      if (pStartZ === undefined && Math.abs(yawRel) > TH.YAW_TURN * 0.25) {
+      if (pStartZ === undefined && (yawRel > yawTh * 0.25 || noseRel > noseTh * 0.25)) {
         pStartZ = m.noseRelZ;
         pStartYaw = m.yaw;
       }
@@ -398,12 +445,11 @@ export function updateChallenge(
       if (pStartZ !== undefined && pStartYaw !== undefined) {
         const dz = Math.abs(m.noseRelZ - pStartZ);
         const dyaw = Math.abs(m.yaw - pStartYaw);
-        if (dyaw > TH.YAW_TURN * 0.6) {
-          parallaxOk = dz > TH.PARALLAX_MIN;
-        }
+        if (dyaw > yawTh * 0.6) parallaxOk = dz > TH.PARALLAX_MIN;
       }
 
-      const reached = yawRel * targetSign > TH.YAW_TURN;
+      // Momentary reach is enough — EITHER pose-matrix yaw OR nose offset.
+      const reached = yawRel > yawTh || noseRel > noseTh;
       return {
         ...state,
         poseProgress: progress,
@@ -415,12 +461,20 @@ export function updateChallenge(
     }
 
     case "nod": {
-      const pitchRel = m.pitch - baseline.pitch;
-      const progress = Math.max(0, Math.min(1, Math.abs(pitchRel) / TH.PITCH_NOD));
+      // Nod = up OR down. Use pose-matrix pitch OR nose vertical offset
+      // relative to baseline. Whichever fires first wins.
+      const pitchRel = Math.abs(m.pitch - baseline.pitch);
+      const noseRel = Math.abs(m.noseDy - baseline.noseDy);
+      const pitchTh = TH.PITCH_NOD_ABS * mul;
+      const noseTh = TH.NOSE_NOD_ABS * mul;
+      const progress = Math.max(
+        0,
+        Math.min(1, Math.max(pitchRel / pitchTh, noseRel / noseTh)),
+      );
       return {
         ...state,
         poseProgress: progress,
-        done: Math.abs(pitchRel) > TH.PITCH_NOD,
+        done: pitchRel > pitchTh || noseRel > noseTh,
       };
     }
   }

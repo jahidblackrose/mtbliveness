@@ -446,15 +446,25 @@ function LiveFaceAI() {
         }
 
         const idx = challengesRef.current.findIndex((c) => !c.done);
+        const activeKind = idx !== -1 ? challengesRef.current[idx].kind : null;
+        // For turn/nod the user MUST move their head — don't require a
+        // perfectly straight framing pose, only that a face is present and
+        // reasonably centered. Otherwise the challenge can never register.
+        const poseChallenge =
+          activeKind === "turnLeft" || activeKind === "turnRight" || activeKind === "nod";
+        const framingOk = poseChallenge
+          ? !!m && faces === 1 && m.centerOffset < TH.CENTER_MAX * 1.6
+          : g.ok;
 
         // Detection + timer only run when actively engaged.
         const canRun =
           !isPaused &&
           !inSoftTimeout &&
-          g.ok &&
+          framingOk &&
           m &&
           baseline &&
           ts >= breatherUntilRef.current;
+
 
         if (canRun && idx === -1) {
           if (!captureScheduled) {
