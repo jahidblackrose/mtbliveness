@@ -247,6 +247,11 @@ export type ChallengeState = {
   parallaxStartNoseRelZ?: number;
   parallaxStartYaw?: number;
   parallaxOk?: boolean;
+  // nod transition tracker
+  nodPhase?: "neutral" | "down" | "up";
+  nodPitchEma?: number;
+  nodBasePitch?: number;
+
 };
 
 export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
