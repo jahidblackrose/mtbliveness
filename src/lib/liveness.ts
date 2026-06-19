@@ -244,6 +244,8 @@ export type ChallengeState = {
   parallaxStartNoseRelZ?: number;
   parallaxStartYaw?: number;
   parallaxOk?: boolean;
+  // turn feedback: user is turning the wrong way relative to instruction
+  wrongWay?: boolean;
   // nod transition tracker
   nodPhase?: "neutral" | "down" | "up";
   nodPitchEma?: number;
