@@ -369,6 +369,21 @@ function LiveFaceAI() {
         audio: false,
       });
       streamRef.current = stream;
+      startRecorder(stream);
+
+      // Reset captured payload
+      setImageBlob(null);
+      setVideoBlob(null);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(null);
+      sessionMetaRef.current = {
+        sessionId:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        startedAt: Date.now(),
+      };
+
 
       challengesRef.current = [];
       setChallengeView([]);
