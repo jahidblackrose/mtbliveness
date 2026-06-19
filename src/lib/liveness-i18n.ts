@@ -147,6 +147,14 @@ export const STRINGS = {
     en: "Slowly nod your head up and down",
   },
   wrongWay: { bn: "অন্য দিকে ঘোরান", en: "Turn the other way" },
+  faceChanged: {
+    bn: "মুখ পরিবর্তিত হয়েছে। শুরু থেকে আবার করুন।",
+    en: "Face changed — restarting from the beginning.",
+  },
+  faceMismatch: {
+    bn: "যাচাই করা মুখ ও ছবির মুখ মেলেনি। আবার শুরু করুন।",
+    en: "Captured face doesn't match the verified face — starting over.",
+  },
 
   // Footer
   disclaimer: {

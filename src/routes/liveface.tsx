@@ -13,7 +13,12 @@ import {
   type Baseline,
   type FaceMetrics,
   type CalibAccumulator,
+  type FaceSignature,
   computeMetrics,
+  computeSignature,
+  avgSignatures,
+  signatureSimilarity,
+  INTEGRITY,
   frameGuidance,
   newChallengeState,
   pickChallenges,
@@ -174,6 +179,15 @@ function LiveFaceAI() {
   const [liveReadout, setLiveReadout] = useState({ blink: 0, smile: 0, yaw: 0, pitch: 0 });
   const readoutAccumRef = useRef(0);
 
+  // ── Post-pass integrity gate: reference signature + live similarity ──
+  const refSigSamplesRef = useRef<FaceSignature[]>([]);
+  const referenceSigRef = useRef<FaceSignature | null>(null);
+  const lastSignatureRef = useRef<FaceSignature | null>(null);
+  const [refSigCaptured, setRefSigCaptured] = useState(false);
+  const [liveSim, setLiveSim] = useState(1);
+  const integrityFailStartRef = useRef<number | null>(null);
+  const [integrityDecision, setIntegrityDecision] = useState<string>("ok");
+
   const currentTimeoutMs = easyMode ? CONFIG.EASY_CHALLENGE_TIMEOUT_MS : CONFIG.CHALLENGE_TIMEOUT_MS;
   const currentTimeoutRef = useRef<number>(CONFIG.CHALLENGE_TIMEOUT_MS);
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
@@ -295,6 +309,26 @@ function LiveFaceAI() {
   const capture = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+
+    // Part B: re-verify SAME-PERSON match at the exact capture moment.
+    // Compare the most recent live signature to the locked reference. A
+    // mismatch here means a face swap happened during the countdown ⇒
+    // abort capture entirely and restart from step 1.
+    const ref = referenceSigRef.current;
+    const cur = lastSignatureRef.current;
+    if (ref && cur) {
+      const sim = signatureSimilarity(ref, cur);
+      setLiveSim(sim);
+      if (sim < INTEGRITY.SIM_CAPTURE) {
+        integrityRestartRef.current?.("mismatch");
+        return;
+      }
+    } else if (ref && !cur) {
+      // Reference exists but no face at the capture instant — treat as mismatch.
+      integrityRestartRef.current?.("mismatch");
+      return;
+    }
+
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -326,6 +360,7 @@ function LiveFaceAI() {
       0.92,
     );
   }, [assembleVideo, fail]);
+  const integrityRestartRef = useRef<((kind: "changed" | "mismatch") => void) | null>(null);
 
 
   const setSmoothGuidance = (text: string, now: number) => {
@@ -410,6 +445,13 @@ function LiveFaceAI() {
         window.clearInterval(captureIntervalRef.current);
         captureIntervalRef.current = null;
       }
+      refSigSamplesRef.current = [];
+      referenceSigRef.current = null;
+      lastSignatureRef.current = null;
+      setRefSigCaptured(false);
+      setLiveSim(1);
+      integrityFailStartRef.current = null;
+      setIntegrityDecision("ok");
       challengeRunningMsRef.current = 0;
       sessionStartRef.current = performance.now();
       setStep("framing");
@@ -473,6 +515,62 @@ function LiveFaceAI() {
   }, []);
 
   const togglePause = useCallback(() => setPaused((p) => !p), []);
+
+  // Part B: integrity failure — restart entire flow from step 1 (framing).
+  // Keeps stream/landmarker alive (cheap), resets all challenge state, and
+  // shows a bilingual hint explaining why.
+  const integrityRestart = useCallback(
+    (kind: "changed" | "mismatch") => {
+      const L = langRef.current;
+      setHintText(t(kind === "changed" ? "faceChanged" : "faceMismatch", L));
+      setIntegrityDecision(kind === "changed" ? "FACE_CHANGED" : "FACE_MISMATCH");
+
+      // Tear down post-pass sequence
+      if (captureIntervalRef.current != null) {
+        window.clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
+      setBigCountdown(null);
+      captureSeqRef.current = "idle";
+      setCaptureSeq("idle");
+      lookStraightHoldRef.current = null;
+
+      // Reset challenge state — passed list cleared (per spec).
+      challengesRef.current = [];
+      setChallengeView([]);
+      setActiveIdx(0);
+      attemptsRef.current = [];
+      framingHoldStartRef.current = null;
+      calibAccRef.current = emptyAccumulator();
+      baselineRef.current = null;
+      setCalibProgress(0);
+      captureBufRef.current = [];
+      spoofRef.current = new SpoofGuard();
+      resetDirectionCalibration();
+
+      // Reset integrity refs
+      refSigSamplesRef.current = [];
+      referenceSigRef.current = null;
+      lastSignatureRef.current = null;
+      setRefSigCaptured(false);
+      setLiveSim(1);
+      integrityFailStartRef.current = null;
+
+      setBlinkMeter(0);
+      setSmileMeter(0);
+      setPoseMeter(0);
+      challengeRunningMsRef.current = 0;
+
+      // Restart rolling video buffer
+      if (streamRef.current) startRecorder(streamRef.current);
+
+      setStep("framing");
+    },
+    [startRecorder],
+  );
+  useEffect(() => {
+    integrityRestartRef.current = integrityRestart;
+  }, [integrityRestart]);
 
 
   useEffect(() => {
@@ -563,9 +661,17 @@ function LiveFaceAI() {
 
       const currentStep = stepRef.current;
 
-      if ((currentStep === "calibrating" || currentStep === "liveness") && faces > 1) {
-        fail(t("secondFace", langRef.current));
-        return;
+      // Part A: multi-face mid-flow does NOT hard fail. frameGuidance()
+      // already returns ok=false + key="onePerson", which pauses challenge
+      // detection/timer and shows the bilingual hint. The user can recover
+      // by getting alone again — no reset, no error screen.
+
+      // Update the live face signature each frame (used by Part B integrity).
+      if (m && result.faceLandmarks?.[0]) {
+        const sig = computeSignature(result.faceLandmarks[0]);
+        lastSignatureRef.current = sig;
+      } else {
+        lastSignatureRef.current = null;
       }
 
       if (currentStep === "framing") {
@@ -641,6 +747,34 @@ function LiveFaceAI() {
           // ALL CHALLENGES PASSED — explicit capture sequence:
           // success (brief celebration) → lookStraight (hold) → 3-2-1 → capture
           const seq = captureSeqRef.current;
+
+          // Finalize the reference signature once at the boundary.
+          if (referenceSigRef.current == null && refSigSamplesRef.current.length > 0) {
+            referenceSigRef.current = avgSignatures(refSigSamplesRef.current);
+            setRefSigCaptured(!!referenceSigRef.current);
+          }
+
+          // Part B: continuously compare current face to reference signature.
+          // Only meaningful when reference exists and a face is present.
+          const ref = referenceSigRef.current;
+          const cur = lastSignatureRef.current;
+          if (ref && cur) {
+            const sim = signatureSimilarity(ref, cur);
+            setLiveSim(sim);
+            if (sim < INTEGRITY.SIM_PASS) {
+              if (integrityFailStartRef.current == null) integrityFailStartRef.current = ts;
+              if (ts - integrityFailStartRef.current >= INTEGRITY.FAIL_SUSTAIN_MS) {
+                integrityRestart("changed");
+                return;
+              }
+            } else {
+              integrityFailStartRef.current = null;
+            }
+          } else if (!cur) {
+            // No face present: don't accumulate mismatch time (Part A: pause).
+            integrityFailStartRef.current = null;
+          }
+
           if (seq === "idle") {
             captureSeqRef.current = "success";
             setCaptureSeq("success");
@@ -700,6 +834,18 @@ function LiveFaceAI() {
             }
           }
         } else if (canRun && m && baseline) {
+          // Sample reference signature ONLY during active challenge engagement
+          // with the verified person (frontal-ish, one face, framing OK). Cap
+          // the buffer so we don't grow unbounded.
+          if (
+            result.faceLandmarks?.[0] &&
+            faces === 1 &&
+            Math.abs(m.yaw) < 0.22 &&
+            Math.abs(m.pitch) < 0.22 &&
+            refSigSamplesRef.current.length < 90
+          ) {
+            refSigSamplesRef.current.push(computeSignature(result.faceLandmarks[0]));
+          }
           const sinceShown = ts - challengePromptedAtRef.current;
           if (sinceShown >= CONFIG.PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
@@ -780,20 +926,10 @@ function LiveFaceAI() {
               }
 
 
-              if (a >= CONFIG.MAX_ATTEMPTS) {
-                // If at least one challenge already passed, accept and proceed.
-                const passed = challengesRef.current.filter((c) => c.done).length;
-                if (passed >= 1) {
-                  challengesRef.current.forEach((c, i) => {
-                    if (i >= idx) challengesRef.current[i] = { ...c, done: true };
-                  });
-                  setChallengeView([...challengesRef.current]);
-                  challengeRunningMsRef.current = 0;
-                  return;
-                }
-                fail(t("failed", L));
-                return;
-              }
+              // Part A: NEVER auto-reset or auto-fail on timeouts. Always
+              // re-arm the CURRENT challenge via soft retry. Earlier passes
+              // stay locked in challengesRef.current. The user can tap
+              // Cancel for an explicit full restart.
               setSoftTimeoutIdx(idx);
 
             }
@@ -970,6 +1106,13 @@ function LiveFaceAI() {
             hintText={hintText}
             easyMode={easyMode}
             fps={fps}
+            integrity={{
+              currentIdx: activeIdx,
+              passed: challengeView.filter((c) => c.done).length,
+              refCaptured: refSigCaptured,
+              liveSim,
+              decision: integrityDecision,
+            }}
             isDev={isDev}
             devOpen={devOpen}
             onToggleDev={() => setDevOpen((v) => !v)}
@@ -1100,6 +1243,7 @@ function LivenessScreen({
   hintText,
   easyMode,
   fps,
+  integrity,
   isDev,
   devOpen,
   onToggleDev,
@@ -1133,6 +1277,7 @@ function LivenessScreen({
   hintText: string;
   easyMode: boolean;
   fps: number;
+  integrity: { currentIdx: number; passed: number; refCaptured: boolean; liveSim: number; decision: string };
   isDev: boolean;
   devOpen: boolean;
   onToggleDev: () => void;
@@ -1357,9 +1502,14 @@ function LivenessScreen({
             )}
 
             {isDev && (
-              <p className="mt-2 text-[10px] text-white/40">
-                FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw >= 0 ? "+" : ""}{liveReadout.yaw.toFixed(2)} ({(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) > 0 ? "LEFT" : (liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) < 0 ? "RIGHT" : "—"}) · pitch {liveReadout.pitch >= 0 ? "+" : ""}{liveReadout.pitch.toFixed(2)} · Y±{DIRECTION.YAW_LEFT_SIGN} N±{DIRECTION.NOSE_LEFT_SIGN}
-              </p>
+              <>
+                <p className="mt-2 text-[10px] text-white/40">
+                  FPS {fps} · blink {liveReadout.blink.toFixed(2)} · smile {liveReadout.smile.toFixed(2)} · yaw {liveReadout.yaw >= 0 ? "+" : ""}{liveReadout.yaw.toFixed(2)} ({(liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) > 0 ? "LEFT" : (liveReadout.yaw * DIRECTION.YAW_LEFT_SIGN) < 0 ? "RIGHT" : "—"}) · pitch {liveReadout.pitch >= 0 ? "+" : ""}{liveReadout.pitch.toFixed(2)} · Y±{DIRECTION.YAW_LEFT_SIGN} N±{DIRECTION.NOSE_LEFT_SIGN}
+                </p>
+                <p className="mt-1 text-[10px] text-white/40">
+                  idx {integrity.currentIdx} · passed {integrity.passed}/{challenges.length} · refSig {integrity.refCaptured ? "✓" : "—"} · sim {integrity.liveSim.toFixed(2)} · {integrity.decision}
+                </p>
+              </>
             )}
           </div>
 
