@@ -1106,6 +1106,13 @@ function LiveFaceAI() {
             hintText={hintText}
             easyMode={easyMode}
             fps={fps}
+            integrity={{
+              currentIdx: activeIdx,
+              passed: challengeView.filter((c) => c.done).length,
+              refCaptured: refSigCaptured,
+              liveSim,
+              decision: integrityDecision,
+            }}
             isDev={isDev}
             devOpen={devOpen}
             onToggleDev={() => setDevOpen((v) => !v)}
