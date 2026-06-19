@@ -171,7 +171,7 @@ function LiveFaceAI() {
   const readoutAccumRef = useRef(0);
 
   const currentTimeoutMs = easyMode ? CONFIG.EASY_CHALLENGE_TIMEOUT_MS : CONFIG.CHALLENGE_TIMEOUT_MS;
-  const currentTimeoutRef = useRef(CONFIG.CHALLENGE_TIMEOUT_MS);
+  const currentTimeoutRef = useRef<number>(CONFIG.CHALLENGE_TIMEOUT_MS);
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
 
   const hintKeyFor = (k: ChallengeKind) =>
