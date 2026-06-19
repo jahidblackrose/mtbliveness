@@ -63,6 +63,29 @@ const CALIBRATION_MS = 1500;
 const PROMPT_REACTION_MIN_MS = 250;
 const CAPTURE_BUFFER = 5;
 
+// ── Submission config (edit these to point at your liveness API) ──
+const API_ENDPOINT: string =
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_LIVENESS_API_ENDPOINT ||
+  "https://example.com/api/liveness";
+const API_KEY: string =
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_LIVENESS_API_KEY || "";
+const SUBMIT_TIMEOUT_MS = 30_000;
+const VIDEO_WINDOW_MS = 10_000;
+
+function pickVideoMime(): string | undefined {
+  if (typeof MediaRecorder === "undefined") return undefined;
+  const candidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  for (const m of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
+type VideoChunk = { ts: number; blob: Blob };
+
+
 function LiveFaceAI() {
   const [lang, setLang] = useState<Lang>("bn");
   const langRef = useRef<Lang>("bn");
@@ -97,6 +120,19 @@ function LiveFaceAI() {
   const [flash, setFlash] = useState(false);
   const [blinkTick, setBlinkTick] = useState(0);
   const stepRef = useRef<Step>("start");
+
+  // ── MediaRecorder rolling buffer (last ~10s) ──
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderMimeRef = useRef<string | undefined>(undefined);
+  const chunksRef = useRef<VideoChunk[]>([]);
+  const [videoSupported, setVideoSupported] = useState(true);
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const sessionMetaRef = useRef<{ sessionId: string; startedAt: number } | null>(null);
+  type SubmitState = "idle" | "uploading" | "ok" | "fail";
+  const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [submitError, setSubmitError] = useState<string>("");
 
   const framingHoldStartRef = useRef<number | null>(null);
 
@@ -162,12 +198,22 @@ function LiveFaceAI() {
     stepRef.current = step;
   }, [step]);
 
+  const stopRecorder = useCallback(() => {
+    const r = recorderRef.current;
+    if (r && r.state !== "inactive") {
+      try { r.stop(); } catch { /* ignore */ }
+    }
+    recorderRef.current = null;
+  }, []);
+
   const stopAll = useCallback(() => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    stopRecorder();
+    chunksRef.current = [];
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
-  }, []);
+  }, [stopRecorder]);
 
   useEffect(() => () => stopAll(), [stopAll]);
   useEffect(
@@ -176,6 +222,68 @@ function LiveFaceAI() {
     },
     [photoUrl],
   );
+  useEffect(
+    () => () => {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+    },
+    [videoUrl],
+  );
+
+  const startRecorder = useCallback((stream: MediaStream) => {
+    chunksRef.current = [];
+    const mime = pickVideoMime();
+    recorderMimeRef.current = mime;
+    if (!mime) {
+      setVideoSupported(false);
+      recorderRef.current = null;
+      return;
+    }
+    try {
+      const rec = new MediaRecorder(stream, { mimeType: mime });
+      rec.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          const ts = performance.now();
+          chunksRef.current.push({ ts, blob: e.data });
+          // Trim to last VIDEO_WINDOW_MS + 1s of cushion.
+          const cutoff = ts - (VIDEO_WINDOW_MS + 1000);
+          while (chunksRef.current.length > 1 && chunksRef.current[0].ts < cutoff) {
+            chunksRef.current.shift();
+          }
+        }
+      };
+      rec.start(1000);
+      recorderRef.current = rec;
+      setVideoSupported(true);
+    } catch {
+      recorderRef.current = null;
+      setVideoSupported(false);
+    }
+  }, []);
+
+  const assembleVideo = useCallback((): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const rec = recorderRef.current;
+      const mime = recorderMimeRef.current;
+      if (!rec || !mime) {
+        resolve(null);
+        return;
+      }
+      const finalize = () => {
+        const parts = chunksRef.current.map((c) => c.blob);
+        if (parts.length === 0) {
+          resolve(null);
+          return;
+        }
+        resolve(new Blob(parts, { type: mime }));
+      };
+      if (rec.state === "inactive") {
+        finalize();
+        return;
+      }
+      rec.onstop = () => finalize();
+      try { rec.stop(); } catch { finalize(); }
+    });
+  }, []);
 
   const fail = useCallback(
     (msg: string) => {
@@ -198,19 +306,29 @@ function LiveFaceAI() {
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(
-      (blob) => {
+      async (blob) => {
         if (!blob) {
           fail(t("captureFail", langRef.current));
           return;
         }
+        setImageBlob(blob);
         setPhotoUrl(URL.createObjectURL(blob));
-        stopAll();
+        // Stop & assemble the rolling video — keep camera stream alive
+        // so retake can re-run the post-pass countdown without redoing challenges.
+        const vb = await assembleVideo();
+        if (vb) {
+          setVideoBlob(vb);
+          setVideoUrl(URL.createObjectURL(vb));
+        } else {
+          setVideoBlob(null);
+        }
         setStep("result");
       },
       "image/jpeg",
       0.92,
     );
-  }, [fail, stopAll]);
+  }, [assembleVideo, fail]);
+
 
   const setSmoothGuidance = (text: string, now: number) => {
     if (text === guidanceDraftRef.current) return;
@@ -254,6 +372,21 @@ function LiveFaceAI() {
         audio: false,
       });
       streamRef.current = stream;
+      startRecorder(stream);
+
+      // Reset captured payload
+      setImageBlob(null);
+      setVideoBlob(null);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(null);
+      sessionMetaRef.current = {
+        sessionId:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        startedAt: Date.now(),
+      };
+
 
       challengesRef.current = [];
       setChallengeView([]);
@@ -288,7 +421,7 @@ function LiveFaceAI() {
       else if (/NotFound|no.*camera/i.test(msg)) fail(t("noCamera", L));
       else fail(msg);
     }
-  }, [fail]);
+  }, [fail, startRecorder, videoUrl]);
 
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
@@ -668,16 +801,108 @@ function LiveFaceAI() {
   const retake = useCallback(() => {
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     setPhotoUrl(null);
+    setImageBlob(null);
+    setVideoBlob(null);
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    setVideoUrl(null);
+    setSubmitState("idle");
+    setSubmitError("");
+
+    // If we still have a live stream, just rerun the post-pass capture
+    // (challenges already passed). Otherwise fall back to a full start.
+    const stream = streamRef.current;
+    if (stream && stream.getTracks().some((t) => t.readyState === "live")) {
+      startRecorder(stream);
+      // Mark all challenges done, jump to lookStraight + 3-2-1
+      challengesRef.current = challengesRef.current.map((c) => ({ ...c, done: true }));
+      setChallengeView([...challengesRef.current]);
+      captureSeqRef.current = "lookStraight";
+      setCaptureSeq("lookStraight");
+      setBigCountdown(null);
+      lookStraightHoldRef.current = null;
+      if (captureIntervalRef.current != null) {
+        window.clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
+      setStep("liveness");
+      return;
+    }
     void start();
-  }, [photoUrl, start]);
+  }, [photoUrl, start, startRecorder, videoUrl]);
 
   const reset = useCallback(() => {
     stopAll();
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     setPhotoUrl(null);
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    setVideoUrl(null);
+    setImageBlob(null);
+    setVideoBlob(null);
+    setSubmitState("idle");
+    setSubmitError("");
     setStep("start");
     setErrorMsg("");
-  }, [photoUrl, stopAll]);
+  }, [photoUrl, stopAll, videoUrl]);
+
+  const buildMeta = useCallback(() => {
+    const session = sessionMetaRef.current;
+    return {
+      sessionId: session?.sessionId ?? null,
+      timestamp: new Date().toISOString(),
+      startedAt: session?.startedAt ?? null,
+      challengesIssued: challengesRef.current.map((c, i) => ({ order: i, kind: c.kind })),
+      perChallengeResult: challengesRef.current.map((c) => ({
+        kind: c.kind,
+        done: c.done,
+        blinkCount: c.blinkCount ?? 0,
+        smileIntensity: c.smileIntensity ?? 0,
+        poseProgress: c.poseProgress ?? 0,
+        parallaxOk: c.parallaxOk ?? null,
+      })),
+      blinkCount: challengesRef.current
+        .filter((c) => c.kind === "blink")
+        .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
+      livenessScore: challengesRef.current.length
+        ? challengesRef.current.filter((c) => c.done).length / challengesRef.current.length
+        : 0,
+      language: langRef.current,
+      easyModeUsed: easyMode,
+      videoSupported,
+      videoMime: recorderMimeRef.current ?? null,
+      spoofFlags: [] as string[],
+    };
+  }, [easyMode, videoSupported]);
+
+  const submit = useCallback(async () => {
+    if (!imageBlob) return;
+    setSubmitState("uploading");
+    setSubmitError("");
+    const fd = new FormData();
+    fd.append("image", imageBlob, "selfie.jpg");
+    if (videoBlob) fd.append("video", videoBlob, "liveness.webm");
+    fd.append("meta", JSON.stringify(buildMeta()));
+
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT_MS);
+    try {
+      const res = await fetch(API_ENDPOINT, {
+        method: "POST",
+        headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : undefined,
+        body: fd,
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSubmitState("ok");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      setSubmitError(msg);
+      setSubmitState("fail");
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }, [buildMeta, imageBlob, videoBlob]);
+
+
 
   const langClass = useMemo(
     () => (lang === "bn" ? "font-bangla" : "font-sans"),
@@ -743,7 +968,19 @@ function LiveFaceAI() {
         )}
 
         {step === "result" && photoUrl && (
-          <ResultScreen photoUrl={photoUrl} onRetake={retake} onConfirm={reset} tx={tx} />
+          <ResultScreen
+            photoUrl={photoUrl}
+            videoUrl={videoUrl}
+            videoSupported={videoSupported}
+            imageBlob={imageBlob}
+            videoBlob={videoBlob}
+            submitState={submitState}
+            submitError={submitError}
+            onRetake={retake}
+            onSubmit={submit}
+            onHome={reset}
+            tx={tx}
+          />
         )}
         {step === "error" && <ErrorScreen msg={errorMsg} onRetry={start} onHome={reset} tx={tx} />}
 
@@ -1248,15 +1485,34 @@ function DevPanel() {
 
 function ResultScreen({
   photoUrl,
+  videoUrl,
+  videoSupported,
+  imageBlob,
+  videoBlob,
+  submitState,
+  submitError,
   onRetake,
-  onConfirm,
+  onSubmit,
+  onHome,
   tx,
 }: {
   photoUrl: string;
+  videoUrl: string | null;
+  videoSupported: boolean;
+  imageBlob: Blob | null;
+  videoBlob: Blob | null;
+  submitState: "idle" | "uploading" | "ok" | "fail";
+  submitError: string;
   onRetake: () => void;
-  onConfirm: () => void;
+  onSubmit: () => void;
+  onHome: () => void;
   tx: Tx;
 }) {
+  const busy = submitState === "uploading";
+  const done = submitState === "ok";
+  const failed = submitState === "fail";
+  const imgKB = imageBlob ? Math.round(imageBlob.size / 1024) : 0;
+  const vidKB = videoBlob ? Math.round(videoBlob.size / 1024) : 0;
   return (
     <section
       className="space-y-4 animate-in fade-in zoom-in-95 duration-300"
@@ -1265,36 +1521,83 @@ function ResultScreen({
     >
       <div className="flex items-center justify-center gap-2 text-emerald-400">
         <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-        <p className="text-sm font-medium">
-          {tx("livenessVerified")} — {tx("passed")}
-        </p>
+        <p className="text-sm font-medium">{tx("captureSuccess")}</p>
       </div>
-      <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
-        <img
-          src={photoUrl}
-          alt={tx("capturedAlt")}
-          className="aspect-[3/4] w-full object-cover"
-        />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
+          <img
+            src={photoUrl}
+            alt={tx("capturedAlt")}
+            className="aspect-[3/4] w-full object-cover"
+          />
+        </div>
+        <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls
+              playsInline
+              className="aspect-[3/4] w-full object-cover bg-black"
+            />
+          ) : (
+            <div className="flex aspect-[3/4] w-full items-center justify-center px-4 text-center text-xs text-zinc-400">
+              {tx("videoUnsupported")}
+            </div>
+          )}
+        </div>
       </div>
+
+      <p className="text-[11px] text-zinc-500">
+        {tx("videoLabel")} · {imgKB} KB image{videoBlob ? ` · ${vidKB} KB video` : ""}
+        {!videoSupported && ` · ${tx("videoUnsupported")}`}
+      </p>
+
+      {done && (
+        <div className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm text-emerald-300 ring-1 ring-emerald-400/30">
+          {tx("submitOk")}
+        </div>
+      )}
+      {failed && (
+        <div className="rounded-xl bg-red-500/15 px-4 py-3 text-sm text-red-300 ring-1 ring-red-400/30">
+          {tx("submitFail")}
+          {submitError && <p className="mt-1 text-[11px] text-red-200/70">{submitError}</p>}
+        </div>
+      )}
+
       <div className="flex gap-3">
         <Button
           variant="outline"
-          onClick={onRetake}
+          onClick={done ? onHome : onRetake}
+          disabled={busy}
           className="flex-1 border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
         >
           <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-          {tx("retake")}
+          {done ? tx("back2") : tx("retake")}
         </Button>
-        <Button
-          onClick={onConfirm}
-          className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
-        >
-          {tx("confirm")}
-        </Button>
+        {!done && (
+          <Button
+            onClick={onSubmit}
+            disabled={busy}
+            className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
+          >
+            {busy ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-900 border-t-transparent" />
+                {tx("uploading")}
+              </span>
+            ) : failed ? (
+              tx("retrySubmit")
+            ) : (
+              tx("submit")
+            )}
+          </Button>
+        )}
       </div>
     </section>
   );
 }
+
 
 function ErrorScreen({
   msg,

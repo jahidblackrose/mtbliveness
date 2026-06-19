@@ -89,6 +89,17 @@ export const STRINGS = {
   },
   retake: { bn: "পুনরায় তুলুন", en: "Retake" },
   confirm: { bn: "নিশ্চিত করুন", en: "Confirm" },
+  captureSuccess: { bn: "ছবি সফলভাবে নেওয়া হয়েছে ✓", en: "Photo captured successfully ✓" },
+  submit: { bn: "জমা দিন", en: "Submit" },
+  uploading: { bn: "জমা দেওয়া হচ্ছে…", en: "Submitting…" },
+  submitOk: { bn: "যাচাই সম্পন্ন ✓ সফলভাবে জমা হয়েছে", en: "Verification complete ✓ Submitted successfully" },
+  submitFail: { bn: "জমা দেওয়া যায়নি। আবার চেষ্টা করুন।", en: "Submission failed. Please try again." },
+  retrySubmit: { bn: "আবার চেষ্টা", en: "Retry" },
+  videoUnsupported: {
+    bn: "এই ব্রাউজারে ভিডিও রেকর্ড করা যায়নি — শুধু ছবি পাঠানো হবে।",
+    en: "Video recording isn't supported here — only the photo will be sent.",
+  },
+  videoLabel: { bn: "শেষ ১০ সেকেন্ডের ভিডিও", en: "Last 10 seconds video" },
 
   // Errors
   failed: { bn: "যাচাই ব্যর্থ হয়েছে", en: "Verification failed" },
