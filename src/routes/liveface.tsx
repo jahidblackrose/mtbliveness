@@ -133,9 +133,24 @@ function LiveFaceAI() {
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const sessionMetaRef = useRef<{ sessionId: string; startedAt: number } | null>(null);
+
+  // ── Session binding (host-provided nonce + voice flag, from URL) ──
+  const sessionParamsRef = useRef<SessionParams>({
+    nonce: null, nonceIssuedAt: null, expiresAt: null, challengesFromHost: null, enableVoice: false,
+  });
+  const consentRef = useRef<{ given: boolean; timestamp: number | null; textVersion: string }>({
+    given: false, timestamp: null, textVersion: CONFIG.CONSENT_TEXT_VERSION,
+  });
+  const sessionAttemptsRef = useRef<number>(0);
+  const challengeTimelineRef = useRef<{ idx: number; kind: string; startedAt: number; completedAt: number | null }[]>([]);
+  const cameraInspectionRef = useRef<CameraInspection | null>(null);
+  const digitsRef = useRef<string>("");
+  const [digitsForVoice, setDigitsForVoice] = useState<string>("");
+
   type SubmitState = "idle" | "uploading" | "ok" | "fail";
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [submitError, setSubmitError] = useState<string>("");
+
 
   const framingHoldStartRef = useRef<number | null>(null);
 
