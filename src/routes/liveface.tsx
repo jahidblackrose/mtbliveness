@@ -1236,8 +1236,27 @@ function LiveFaceAI() {
           <LangToggle lang={lang} onChange={setLang} />
         </header>
 
-        {step === "start" && <StartScreen onStart={start} tx={tx} />}
+        {step === "start" && (
+          <StartScreen
+            onStart={requestStart}
+            tx={tx}
+            voiceEnabled={sessionParamsRef.current.enableVoice}
+            nonceBound={!!sessionParamsRef.current.nonce}
+          />
+        )}
+        {step === "consent" && (
+          <ConsentScreen
+            tx={tx}
+            voiceEnabled={sessionParamsRef.current.enableVoice}
+            onAccept={acceptConsent}
+            onDecline={declineConsent}
+          />
+        )}
+        {step === "blocked" && (
+          <ErrorScreen msg={errorMsg || tx("tooManyAttempts")} onRetry={reset} onHome={reset} tx={tx} />
+        )}
         {step === "loading" && <LoadingScreen tx={tx} />}
+
         {(step === "framing" || step === "calibrating" || step === "liveness") && (
           <LivenessScreen
             phase={step}
