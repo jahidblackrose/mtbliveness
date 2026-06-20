@@ -1100,43 +1100,98 @@ function LiveFaceAI() {
     setErrorMsg("");
   }, [photoUrl, stopAll, videoUrl]);
 
-  const buildMeta = useCallback(() => {
-    const session = sessionMetaRef.current;
-    return {
-      sessionId: session?.sessionId ?? null,
-      timestamp: new Date().toISOString(),
-      startedAt: session?.startedAt ?? null,
-      challengesIssued: challengesRef.current.map((c, i) => ({ order: i, kind: c.kind })),
-      perChallengeResult: challengesRef.current.map((c) => ({
-        kind: c.kind,
-        done: c.done,
-        blinkCount: c.blinkCount ?? 0,
-        smileIntensity: c.smileIntensity ?? 0,
-        poseProgress: c.poseProgress ?? 0,
-        parallaxOk: c.parallaxOk ?? null,
-      })),
-      blinkCount: challengesRef.current
-        .filter((c) => c.kind === "blink")
-        .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
-      livenessScore: challengesRef.current.length
-        ? challengesRef.current.filter((c) => c.done).length / challengesRef.current.length
-        : 0,
-      language: langRef.current,
-      easyModeUsed: easyMode,
-      videoSupported,
-      videoMime: recorderMimeRef.current ?? null,
-      spoofFlags: [] as string[],
-    };
-  }, [easyMode, videoSupported]);
+  const buildMeta = useCallback(
+    (extras?: { imageHash?: string | null; videoHash?: string | null }) => {
+      const session = sessionMetaRef.current;
+      const sp = sessionParamsRef.current;
+      const cam = cameraInspectionRef.current;
+      const consent = consentRef.current;
+      return {
+        // ── identity / session binding ──
+        sessionId: session?.sessionId ?? null,
+        sessionNonce: sp.nonce,
+        nonceIssuedAt: sp.nonceIssuedAt,
+        nonceExpiresAt: sp.expiresAt,
+        timestamp: new Date().toISOString(),
+        startedAt: session?.startedAt ?? null,
+
+        // ── consent ──
+        consent: {
+          given: consent.given,
+          timestamp: consent.timestamp,
+          textVersion: consent.textVersion,
+        },
+
+        // ── challenges (issued order + timestamps) ──
+        challengeOrder: challengesRef.current.map((c) => c.kind),
+        challengesIssued: challengesRef.current.map((c, i) => ({ order: i, kind: c.kind })),
+        perChallengeTimestamps: challengeTimelineRef.current,
+        perChallengeResult: challengesRef.current.map((c) => ({
+          kind: c.kind,
+          done: c.done,
+          blinkCount: c.blinkCount ?? 0,
+          smileIntensity: c.smileIntensity ?? 0,
+          poseProgress: c.poseProgress ?? 0,
+          parallaxOk: c.parallaxOk ?? null,
+        })),
+        blinkCount: challengesRef.current
+          .filter((c) => c.kind === "blink")
+          .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
+        livenessScore: challengesRef.current.length
+          ? challengesRef.current.filter((c) => c.done).length / challengesRef.current.length
+          : 0,
+
+        // ── voice (advisory; server runs ASR) ──
+        voice: sp.enableVoice
+          ? { enabled: true, expectedDigits: digitsRef.current, asrRequired: true }
+          : { enabled: false },
+
+        // ── tamper-evidence ──
+        imageHash: extras?.imageHash ?? null,
+        videoHash: extras?.videoHash ?? null,
+
+        // ── device / camera (heuristic; advisory) ──
+        device: collectDeviceInfo(),
+        camera: cam
+          ? {
+              label: cam.label,
+              virtualCameraSuspected: cam.virtualCameraSuspected,
+              settings: cam.settings,
+              capabilities: cam.capabilities,
+            }
+          : null,
+
+        // ── fraud / attempts ──
+        attemptCount: sessionAttemptsRef.current,
+
+        // ── UI / capture state ──
+        language: langRef.current,
+        easyModeUsed: easyMode,
+        videoSupported,
+        videoMime: recorderMimeRef.current ?? null,
+        integrityDecision,
+        spoofFlags: [] as string[],
+
+        // ── advisory disclaimer for server consumers ──
+        clientNotice:
+          "All client-side liveness/quality signals are advisory. The server must independently re-verify the media and nonce.",
+      };
+    },
+    [easyMode, videoSupported, integrityDecision],
+  );
 
   const submit = useCallback(async () => {
     if (!imageBlob) return;
     setSubmitState("uploading");
     setSubmitError("");
+    const [imageHash, videoHash] = await Promise.all([
+      sha256Blob(imageBlob),
+      videoBlob ? sha256Blob(videoBlob) : Promise.resolve(null),
+    ]);
     const fd = new FormData();
     fd.append("image", imageBlob, "selfie.jpg");
     if (videoBlob) fd.append("video", videoBlob, "liveness.webm");
-    fd.append("meta", JSON.stringify(buildMeta()));
+    fd.append("meta", JSON.stringify(buildMeta({ imageHash, videoHash })));
 
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => ctrl.abort(), CONFIG.SUBMIT_TIMEOUT_MS);
@@ -1157,6 +1212,7 @@ function LiveFaceAI() {
       window.clearTimeout(timer);
     }
   }, [buildMeta, imageBlob, videoBlob]);
+
 
 
 
