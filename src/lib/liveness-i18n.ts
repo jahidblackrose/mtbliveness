@@ -42,8 +42,6 @@ export const STRINGS = {
   eyeLevel: { bn: "ক্যামেরা চোখের সমান উচ্চতায় ধরুন", en: "Hold camera at eye level" },
 
   // Surprise / unpredictable challenges (Change 1)
-  followDot: { bn: "বিন্দুটি চোখ দিয়ে অনুসরণ করুন", en: "Follow the dot with your eyes" },
-  followDotHint: { bn: "মাথা সামান্য ঘুরিয়ে বিন্দুর দিকে তাকান", en: "Move your head slightly toward the dot" },
   randomSeq: { bn: "করুন: {a}, তারপর {b}", en: "Do: {a}, then {b}" },
   seqIntro: { bn: "দুটি ধাপ — একটির পর একটি করুন", en: "Two quick steps — one after another" },
   seqProgress: { bn: "{n}/{t}", en: "{n}/{t}" },
