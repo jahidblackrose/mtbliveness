@@ -44,6 +44,32 @@ export const CONFIG = {
   CONSENT_TEXT_VERSION: "v1",
   MAX_SESSION_ATTEMPTS: 3,
   NONCE_DEFAULT_TTL_MS: 2 * 60_000,
+
+  // ── Re-liveness on movement during capture (Change 1) ──
+  FACE_LOST_REDO_MS: 1500,
+
+  // ── Mouth-open challenge (Change 2) ──
+  MOUTH_OPEN_HOLD_MS: 250,
+  MOUTH_OPEN_DELTA: 0.25,
+  MOUTH_OPEN_ABS: 0.40,
+  MOUTH_OPEN_SMILE_MAX: 0.7,
+
+  // ── Signed pitch directional (Change 3) ──
+  PITCH_ABS: 0.18,
+  PITCH_UP_SIGN: -1 as 1 | -1,
+  NOD_FULL_CYCLE: false,
+
+  // ── Capture quality / compliance gates (Change 4) ──
+  QUALITY_HOLD_MS: 500,
+  LUMA_MAX: 235,
+  WB_MAX_DELTA: 28,
+  BG_MIN_LUMA: 170,
+  BG_MAX_STDDEV: 55,
+  GLARE_MAX_RATIO: 0.04,
+  OCCLUSION_MIN_CONF: 0.6,
+  EYE_LEVEL_MAX_PITCH: 0.22,
+  EYE_LEVEL_Y_BAND: 0.18,
+  QUALITY_SAMPLE_HZ: 10,
 } as const;
 
 

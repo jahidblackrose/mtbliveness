@@ -45,6 +45,9 @@ export function ChallengeDemo({
       {kind === "turnLeft" && <TurnDemo size={size} direction="left" />}
       {kind === "turnRight" && <TurnDemo size={size} direction="right" />}
       {kind === "nod" && <NodDemo size={size} />}
+      {kind === "lookUp" && <LookDemo size={size} direction="up" />}
+      {kind === "lookDown" && <LookDemo size={size} direction="down" />}
+      {kind === "mouthOpen" && <MouthOpenDemo size={size} />}
     </div>
   );
 }

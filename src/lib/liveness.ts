@@ -210,7 +210,7 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 // ─────────────────────────────────────────────────────────────────────────────
 // Challenges
 // ─────────────────────────────────────────────────────────────────────────────
-export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod";
+export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen";
 
 
 export function pickChallenges(): ChallengeKind[] {
@@ -662,7 +662,11 @@ export function updateChallenge(
       };
     }
 
-
+    // Phase A stubs — wired in Phase B
+    case "lookUp":
+    case "lookDown":
+    case "mouthOpen":
+      return state;
   }
 }
 
