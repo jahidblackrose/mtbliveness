@@ -48,7 +48,7 @@ export function ChallengeDemo({
       {kind === "lookUp" && <LookDemo size={size} direction="up" />}
       {kind === "lookDown" && <LookDemo size={size} direction="down" />}
       {kind === "mouthOpen" && <MouthOpenDemo size={size} />}
-      {kind === "followDot" && <FollowDotDemo size={size} />}
+      
       {kind === "randomSequence" && <RandomSeqDemo size={size} />}
       {kind === "readDigits" && <RandomSeqDemo size={size} />}
     </div>
