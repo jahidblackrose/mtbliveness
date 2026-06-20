@@ -243,9 +243,6 @@ export function pickChallenges(): ChallengeKind[] {
   shuffle(surprisePool);
   const surprise = surprisePool[0];
 
-  // Insert surprise + head at random positions among easy → 4 total.
-  const picked = [...easyPicked];
-  // Replace one easy slot with the head action to keep count = 4 incl. surprise.
   // Order: 2 easy + 1 head + 1 surprise, shuffled.
   const base: ChallengeKind[] = [easyPicked[0], easyPicked[1], head, surprise];
   shuffle(base);
