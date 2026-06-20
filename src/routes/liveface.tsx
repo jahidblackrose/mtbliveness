@@ -617,7 +617,11 @@ function LiveFaceAI() {
       ? sp.challengesFromHost
       : (sp.nonce ? pickChallengesFromNonce(sp.nonce) : pickChallenges());
     const now = performance.now();
-    const initial = chosen.map((k) => newChallengeState(k, now));
+    const initial = chosen.map((k) =>
+      k === "randomSequence" && sp.nonce
+        ? newChallengeState(k, now, { seqActions: seqActionsFromNonce(sp.nonce) })
+        : newChallengeState(k, now),
+    );
 
     challengesRef.current = initial;
     attemptsRef.current = initial.map(() => 0);
