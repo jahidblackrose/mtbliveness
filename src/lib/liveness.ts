@@ -458,26 +458,21 @@ function calibrateYawSignFromNose(
   baseline: Baseline,
   targetDir: 1 | -1,
   yawTh: number,
-  pitchTh: number,
+  _pitchTh: number,
 ) {
   if (DIRECTION.calibratedYaw) return;
   const rawYawChange = m.yaw - baseline.yaw;
-  const yawChange = rawYawChange * DIRECTION.YAW_LEFT_SIGN;
-  const pitchChange = m.pitch - baseline.pitch;
-  const noseChange = (m.noseDx - baseline.noseDx) * DIRECTION.NOSE_LEFT_SIGN;
+  const noseChangeRaw = m.noseDx - baseline.noseDx;
+  const noseChange = noseChangeRaw * DIRECTION.NOSE_LEFT_SIGN;
   const noseTh = TH.NOSE_TURN_ABS;
 
-  // Use nose offset only as a sign reference for mirrored/device variance.
-  // Passing still depends on canonical signed yaw only.
+  // Nose is the AUTHORITATIVE direction signal. As soon as nose moves clearly
+  // toward the requested direction, align YAW_LEFT_SIGN with the nose verdict.
   const noseSupportsPrompt = noseChange * targetDir > noseTh;
-  const yawOpposesPrompt = yawChange * targetDir < -yawTh * 0.5;
-  const yawSupportsPrompt = yawChange * targetDir > yawTh;
-  const horizontalEnough = square(yawChange) > square(pitchChange) && square(noseChange) > square(noseTh);
-
-  if (horizontalEnough && noseSupportsPrompt && yawOpposesPrompt) {
-    DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
-    DIRECTION.calibratedYaw = true;
-  } else if (horizontalEnough && yawSupportsPrompt && square(pitchChange) < square(pitchTh)) {
+  if (noseSupportsPrompt && Math.abs(rawYawChange) > yawTh * 0.4) {
+    // The sign that rawYawChange*sign agrees with targetDir.
+    const wantSign = (rawYawChange * targetDir > 0 ? 1 : -1) as 1 | -1;
+    DIRECTION.YAW_LEFT_SIGN = wantSign;
     DIRECTION.calibratedYaw = true;
   }
 }
@@ -491,10 +486,12 @@ export function inspectHeadGesture(
 ): HeadGestureDebug {
   const yawTh = TH.YAW_TURN_ABS * mul;
   const pitchTh = TH.PITCH_NOD_ABS * mul;
+  const noseTh = TH.NOSE_TURN_ABS * mul;
   const signedYaw = m.yaw * DIRECTION.YAW_LEFT_SIGN;
   const signedPitch = m.pitch;
   const yawChange = (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN;
   const pitchChange = m.pitch - baseline.pitch;
+  const noseChange = (m.noseDx - baseline.noseDx) * DIRECTION.NOSE_LEFT_SIGN;
   const dominantAxis = axisDominance(yawChange, pitchChange);
   const resolved = resolvedGesture(yawChange, pitchChange, yawTh, pitchTh, dominantAxis);
 
@@ -505,11 +502,19 @@ export function inspectHeadGesture(
 
   if (requested === "turnLeft" || requested === "turnRight") {
     const targetDir = requested === "turnLeft" ? 1 : -1;
-    correctAxis = dominantAxis === "yaw";
-    correctSign = yawChange * targetDir > yawTh;
+    // Vote from nose (authoritative) and from signed yaw.
+    const noseVote = noseChange * targetDir > noseTh;
+    const yawVote = yawChange * targetDir > yawTh;
+    // Pass on EITHER, with axis not dominated by pitch.
+    correctAxis = dominantAxis !== "pitch";
+    correctSign = noseVote || yawVote;
     pass = startedNearNeutral && correctAxis && correctSign;
-    if (!pass && dominantAxis === "yaw" && yawChange * -targetDir > yawTh) wrongHint = "turnOtherWay";
-    else if (!pass && resolved !== "none") wrongHint = "wrongDir";
+    if (!pass) {
+      // Only claim "wrong direction" when the NOSE confirms it (don't lie when yaw sign drifted).
+      const noseWrong = noseChange * -targetDir > noseTh;
+      if (noseWrong) wrongHint = "turnOtherWay";
+      else if (dominantAxis === "pitch" && Math.abs(pitchChange) > pitchTh) wrongHint = "nodNotSide";
+    }
   } else if (requested === "nod") {
     correctAxis = dominantAxis === "pitch";
     correctSign = pitchChange > pitchTh || -pitchChange > pitchTh;
