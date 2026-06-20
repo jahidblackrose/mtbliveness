@@ -313,11 +313,12 @@ an otherwise-passing turn that lacks 3-D structure.
 
 ---
 
-## 10. Post-pass integrity gate (`FaceSignature`)
+## 10. Continuous identity gate (`FaceSignature`)
 
-Goal: between "all challenges passed" and "shutter fires" we must
-guarantee the **same person** is in the frame. We compute a small,
-view-stable geometric signature:
+Goal: from the **end of calibration** through to the **shutter** we must
+guarantee the **same person** is in the frame — including *between* and
+*during* challenges, to close the inter-challenge face-swap gap. We
+compute a small, view-stable geometric signature:
 
 ```
 S = {
@@ -332,16 +333,20 @@ Similarity:
 `sim = 1 − 2.5 · mean(rel_diff_i)` clamped to `[0,1]`,
 where `rel_diff(x,y) = |x-y| / mean(|x|,|y|)`.
 
-- `INTEGRITY.SIM_PASS = 0.62` — sustained dip below this for
-  `FAIL_SUSTAIN_MS = 700 ms` after all challenges pass → face-changed,
-  full restart from challenge 1 with a bilingual notice.
-- `INTEGRITY.SIM_CAPTURE = 0.58` — hard gate at the moment of capture.
-  Below this we abort the capture and restart.
+- The reference is **locked at the end of calibration** (average of 3–5
+  baseline samples) and is the same reference used from that point on.
+- Comparison runs **continuously** from then until capture. A sustained
+  dip below `INTEGRITY.SIM_PASS = 0.62` for `FAIL_SUSTAIN_MS = 700 ms`
+  triggers a **full restart from challenge 1** with a bilingual notice.
+- `INTEGRITY.SIM_CAPTURE = 0.58` is a hard gate at the shutter.
+- **Pose robustness.** The signature is only evaluated on **near-frontal
+  frames**; during head turns, mouth-open, big smiles, etc., we **hold
+  the last good sim** rather than letting normal expression/pose changes
+  falsely trip an identity restart.
 - If the same face leaves and returns within tolerance, the 3-2-1
   countdown pauses then resumes (no penalty for blinking out).
 
-The reference signature is the average of the calibration-window
-signatures, refreshed each time the user reaches the look-straight hold.
+
 
 ---
 
