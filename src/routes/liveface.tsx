@@ -519,6 +519,36 @@ function LiveFaceAI() {
     }
   }, [fail, startRecorder, videoUrl]);
 
+  // Gate: nonce staleness + per-session attempt cap + consent before any camera access.
+  const requestStart = useCallback(() => {
+    const L = langRef.current;
+    if (isNonceStale(sessionParamsRef.current)) { fail(t("sessionExpired", L)); return; }
+    if (sessionAttemptsRef.current >= CONFIG.MAX_SESSION_ATTEMPTS) {
+      setErrorMsg(t("tooManyAttempts", L));
+      setStep("blocked");
+      return;
+    }
+    if (!consentRef.current.given) { setStep("consent"); return; }
+    sessionAttemptsRef.current += 1;
+    void start();
+  }, [fail, start]);
+
+  const acceptConsent = useCallback(() => {
+    consentRef.current = {
+      given: true,
+      timestamp: Date.now(),
+      textVersion: CONFIG.CONSENT_TEXT_VERSION,
+    };
+    sessionAttemptsRef.current += 1;
+    void start();
+  }, [start]);
+
+  const declineConsent = useCallback(() => {
+    setStep("start");
+  }, []);
+
+
+
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
     const v = videoRef.current;
