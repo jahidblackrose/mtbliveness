@@ -980,7 +980,10 @@ function LiveFaceAI() {
                   fail(t("flatSurface", langRef.current));
                   return;
                 }
+                const tl = challengeTimelineRef.current[idx];
+                if (tl && tl.completedAt == null) tl.completedAt = Date.now();
                 setChallengeView([...challengesRef.current]);
+
                 const nextIdx = Math.min(idx + 1, challengesRef.current.length - 1);
                 breatherUntilRef.current = ts + CONFIG.CHALLENGE_BREATHER_MS;
                 window.setTimeout(() => {
