@@ -316,10 +316,10 @@ export const TH = {
   FACE_SIZE_MIN: 0.28,
   FACE_SIZE_MAX: 0.9,
   BRIGHT_MIN: 40,
-  // Head turn — ~11° momentary cross.
-  YAW_TURN: 0.20,
-  YAW_TURN_ABS: 0.20,
-  NOSE_TURN_ABS: 0.16,
+  // Head turn — small/comfortable: ~7° momentary cross. Nose is the authoritative direction signal.
+  YAW_TURN: 0.12,
+  YAW_TURN_ABS: 0.12,
+  NOSE_TURN_ABS: 0.10,
   // Nod ~10–12°
   PITCH_NOD: 0.18,
   PITCH_NOD_ABS: 0.18,
