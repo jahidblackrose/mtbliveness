@@ -1265,7 +1265,28 @@ function LiveFaceAI() {
         videoSupported,
         videoMime: recorderMimeRef.current ?? null,
         integrityDecision,
-        spoofFlags: [] as string[],
+        ...(() => {
+          // ── SLICE 1+2: PAD risk + upper-body presence (advisory) ──
+          const pad = padRef.current;
+          const cam = cameraInspectionRef.current;
+          const upper = poseRef.current.info;
+          const flags: Partial<Record<SpoofFlag, number>> = {
+            "screen-artifact": pad.moire > CONFIG.MOIRE_ENERGY_MAX ? pad.moire : 0,
+            "screen-flicker": pad.flicker > CONFIG.FLICKER_SCORE_MAX ? pad.flicker : 0,
+            "planar-motion": pad.planar > CONFIG.PLANAR_MOTION_MAX ? pad.planar : 0,
+            "virtualCameraSuspected": cam?.virtualCameraSuspected ? 1 : 0,
+          };
+          const replayRisk = replayRiskScore(flags, CONFIG.REPLAY_RISK_WEIGHTS);
+          const active = activeFlags(flags, 0.5);
+          return {
+            spoofFlags: active,
+            replayRisk,
+            needsManualReview: replayRisk > CONFIG.REPLAY_RISK_THRESHOLD,
+            padSignals: { moire: pad.moire, flicker: pad.flicker, planar: pad.planar },
+            upperBody: upper ?? { shouldersVisible: null, shoulderSpanRatio: 0, shoulderMotionOk: null },
+            depth: { method: "monocular-proxy", compliant: false },
+          };
+        })(),
 
         // ── advisory disclaimer for server consumers ──
         clientNotice:
