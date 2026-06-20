@@ -1484,10 +1484,6 @@ function LiveFaceAI() {
             devOpen={devOpen}
             onToggleDev={() => setDevOpen((v) => !v)}
             onCancel={reset}
-            onDotSide={(side) => {
-              const c = challengesRef.current[activeIdx];
-              if (c && c.kind === "followDot") c.dotSide = side;
-            }}
             padReadout={{
               moire: padRef.current.moire,
               flicker: padRef.current.flicker,
