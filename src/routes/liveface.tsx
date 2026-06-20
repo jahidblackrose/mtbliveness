@@ -560,9 +560,13 @@ function LiveFaceAI() {
   }, [step]);
 
   const beginChallenges = useCallback(() => {
-    const chosen = pickChallenges();
+    const sp = sessionParamsRef.current;
+    const chosen = sp.challengesFromHost && sp.challengesFromHost.length
+      ? sp.challengesFromHost
+      : (sp.nonce ? pickChallengesFromNonce(sp.nonce) : pickChallenges());
     const now = performance.now();
     const initial = chosen.map((k) => newChallengeState(k, now));
+
     challengesRef.current = initial;
     attemptsRef.current = initial.map(() => 0);
     setChallengeView(initial);
