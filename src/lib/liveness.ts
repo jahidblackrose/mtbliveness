@@ -274,13 +274,36 @@ export type ChallengeState = {
   // followDot / randomSequence (Phase B)
   dotSide?: { x: -1 | 0 | 1; y: -1 | 0 | 1 };
   seqStep?: 0 | 1;
+  seqActions?: [ChallengeKind, ChallengeKind]; // pair of single-action kinds, in order
+  seqSubState?: ChallengeState;                 // per-frame state of the current sub-action
 };
 
-export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
+// Pool of single-action challenges eligible for the random sequence pair.
+// Excludes composites (followDot/randomSequence/readDigits) and nod (too similar
+// to lookUp/lookDown for a sub-step).
+const SEQ_POOL: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+export function pickSeqActions(rng: () => number = Math.random): [ChallengeKind, ChallengeKind] {
+  const arr = [...SEQ_POOL];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return [arr[0], arr[1]];
+}
+
+export function newChallengeState(
+  kind: ChallengeKind,
+  now: number,
+  opts?: { seqActions?: [ChallengeKind, ChallengeKind] },
+): ChallengeState {
   const base: ChallengeState = { kind, done: false, startedAt: now };
   if (kind === "blink")
     return { ...base, blinkCount: 0, blinkPhase: "open", blinkEma: 0, blinkLastCountedAt: 0 };
   if (kind === "smile") return { ...base, smileEma: 0, smileIntensity: 0 };
+  if (kind === "randomSequence") {
+    const actions = opts?.seqActions ?? pickSeqActions();
+    return { ...base, seqStep: 0, seqActions: actions, seqSubState: newChallengeState(actions[0], now) };
+  }
   return base;
 }
 
