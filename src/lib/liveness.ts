@@ -236,10 +236,8 @@ export function pickChallenges(): ChallengeKind[] {
   shuffle(headPool);
   const head = headPool[0];
 
-  // Surprise: prefer randomSequence; followDot only behind a flag.
-  const surprisePool: ChallengeKind[] = CHALLENGE_FLAGS.enableFollowDot
-    ? ["randomSequence", "followDot"]
-    : ["randomSequence"];
+  // Surprise: randomSequence (followDot removed entirely).
+  const surprisePool: ChallengeKind[] = ["randomSequence"];
   shuffle(surprisePool);
   const surprise = surprisePool[0];
 
