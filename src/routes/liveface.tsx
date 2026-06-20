@@ -1686,7 +1686,7 @@ function LivenessScreen({
   devOpen,
   onToggleDev,
   onCancel,
-  onDotSide,
+  
   padReadout,
   tx,
   lang,
