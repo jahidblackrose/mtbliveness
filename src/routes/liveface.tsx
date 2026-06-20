@@ -1873,12 +1873,17 @@ function LivenessScreen({
                     {paused ? tx("paused") : `${secondsLeft}s`}
                   </span>
                 )}
-                {phase === "liveness" && !inCapture && active?.kind === "blink" && (
+                {phase === "liveness" && !inCapture && displayKind === "blink" && displayActive && (
                   <span
                     key={blinkTick}
                     className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
                   >
-                    {tx("blinkProgress", { n: active.blinkCount ?? 0 })}
+                    {tx("blinkProgress", { n: displayActive.blinkCount ?? 0 })}
+                  </span>
+                )}
+                {phase === "liveness" && !inCapture && isSeq && (
+                  <span className="text-[10px] font-semibold tabular-nums text-sky-300 ring-1 ring-sky-400/30 rounded-full px-2 py-0.5">
+                    {tx("seqProgress", { n: seqStep + 1, t: 2 })}
                   </span>
                 )}
               </div>
