@@ -272,3 +272,20 @@ export const GUIDANCE_KEY: Record<GuidanceKey, StringKey> = {
   straight: "straight",
   holdStill: "holdStill",
 };
+
+// Per-action SHORT labels used ONLY to inject into composite messages
+// (e.g. randomSequence sub-step hint). NOT used as a primary instruction —
+// for that, use CHALLENGE_KEY → STRINGS which has the full friendly sentence.
+export const ACTION_SHORT: Partial<Record<ChallengeKind, Pair>> = {
+  blink: { bn: "চোখের পলক ফেলুন", en: "blink" },
+  smile: { bn: "হাসুন", en: "smile" },
+  mouthOpen: { bn: "মুখ হাঁ করুন", en: "open your mouth" },
+  turnLeft: { bn: "বাঁ দিকে তাকান", en: "look left" },
+  turnRight: { bn: "ডান দিকে তাকান", en: "look right" },
+  lookUp: { bn: "উপরে তাকান", en: "look up" },
+  lookDown: { bn: "নিচে তাকান", en: "look down" },
+};
+export function actionShort(kind: ChallengeKind, lang: Lang): string {
+  const p = ACTION_SHORT[kind];
+  return p ? p[lang] : kind;
+}
