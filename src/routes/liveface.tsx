@@ -693,6 +693,11 @@ function LiveFaceAI() {
       refSigSamplesRef.current = [];
       referenceSigRef.current = null;
       lastSignatureRef.current = null;
+      identityLockedAtMsRef.current = null;
+      simMinRef.current = 1;
+      lastFrontalSimRef.current = 1;
+      maxSigJumpRef.current = 0;
+      continuityBreaksRef.current = 0;
       setRefSigCaptured(false);
       setLiveSim(1);
       integrityFailStartRef.current = null;
