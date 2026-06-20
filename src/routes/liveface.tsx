@@ -1683,6 +1683,7 @@ function LivenessScreen({
   onDotSide,
   padReadout,
   tx,
+  lang,
 }: {
   phase: "framing" | "calibrating" | "liveness";
   videoRef: React.RefObject<HTMLVideoElement | null>;
