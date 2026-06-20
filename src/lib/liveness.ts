@@ -965,4 +965,6 @@ export const INTEGRITY = {
   SIM_PASS: 0.62,       // below this for sustained time = different person
   SIM_CAPTURE: 0.58,    // hard gate at the moment of capture
   FAIL_SUSTAIN_MS: 700, // mismatch must persist before restart fires
+  LOCK_MIN_SAMPLES: 8,  // frontal-frame samples required before reference locks
+  MAX_SIG_JUMP: 0.35,   // 1-sim delta between consecutive frames flagged as swap
 };
