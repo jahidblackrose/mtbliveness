@@ -16,7 +16,7 @@ export const STRINGS = {
   startBtn: { bn: "শুরু করুন", en: "Start verification" },
   step1: { bn: "ক্যামেরার অনুমতি দিন", en: "Allow camera access" },
   step2: { bn: "ফ্রেমের মাঝে মুখ রাখুন", en: "Center your face in the oval" },
-  step3: { bn: "৩টি র‍্যান্ডম কাজ সম্পন্ন করুন", en: "Complete 3 randomized challenges" },
+  step3: { bn: "৪টি র‍্যান্ডম কাজ সম্পন্ন করুন", en: "Complete 4 randomized challenges" },
 
   step4: { bn: "ছবি স্বয়ংক্রিয়ভাবে তোলা হবে", en: "We'll auto-capture your photo" },
   loading: { bn: "ডিভাইসে মডেল লোড হচ্ছে…", en: "Loading on-device model…" },
