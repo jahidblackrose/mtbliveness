@@ -1892,7 +1892,7 @@ function LivenessScreen({
             <div className="mt-1 flex items-center gap-3">
               {/* DEMO LEFT OF MESSAGE */}
               {showDemo && active && (
-                <ChallengeDemo kind={active.kind} done={active.done} size={56} />
+                <ChallengeDemo kind={displayKind ?? active.kind} done={displayActive?.done ?? active.done} size={56} />
               )}
               {!showDemo && (captureSeq === "success" || captureSeq === "capturing") && (
                 <div
