@@ -627,13 +627,12 @@ function LiveFaceAI() {
   }, []);
 
   const tryAgainCurrent = useCallback(() => {
-    const idx = softTimeoutRef.current;
-    if (idx == null) return;
-    const cur = challengesRef.current[idx];
-    if (!cur) return;
+    // Policy: if any challenge fails/times out, restart ALL challenges from 0.
     const now = performance.now();
-    challengesRef.current[idx] = newChallengeState(cur.kind, now);
+    challengesRef.current = challengesRef.current.map((c) => newChallengeState(c.kind, now));
     setChallengeView([...challengesRef.current]);
+    attemptsRef.current = challengesRef.current.map(() => 0);
+    setActiveIdx(0);
     challengeStartRef.current = now;
     challengePromptedAtRef.current = now;
     challengeRunningMsRef.current = 0;
