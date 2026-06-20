@@ -378,9 +378,9 @@ export function setEasyMode(on: boolean) {
     TH.BLINK_HIGH_OFFSET = 0.15;
     TH.BLINK_LOW_OFFSET = 0.06;
     TH.BLINK_ABS = 0.35;
-    TH.YAW_TURN = 0.16;
-    TH.YAW_TURN_ABS = 0.16;
-    TH.NOSE_TURN_ABS = 0.13;
+    TH.YAW_TURN = 0.10;
+    TH.YAW_TURN_ABS = 0.10;
+    TH.NOSE_TURN_ABS = 0.08;
     TH.PITCH_NOD = 0.13;
     TH.PITCH_NOD_ABS = 0.13;
     TH.NOSE_NOD_ABS = 0.07;
@@ -392,9 +392,9 @@ export function setEasyMode(on: boolean) {
     TH.BLINK_HIGH_OFFSET = 0.20;
     TH.BLINK_LOW_OFFSET = 0.08;
     TH.BLINK_ABS = 0.45;
-    TH.YAW_TURN = 0.22;
-    TH.YAW_TURN_ABS = 0.22;
-    TH.NOSE_TURN_ABS = 0.18;
+    TH.YAW_TURN = 0.12;
+    TH.YAW_TURN_ABS = 0.12;
+    TH.NOSE_TURN_ABS = 0.10;
     TH.PITCH_NOD = 0.18;
     TH.PITCH_NOD_ABS = 0.18;
     TH.NOSE_NOD_ABS = 0.10;
