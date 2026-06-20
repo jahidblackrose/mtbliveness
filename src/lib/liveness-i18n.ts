@@ -24,8 +24,8 @@ export const STRINGS = {
   // Challenge names (top band primary instruction)
   blinkTwice: { bn: "ধীরে ধীরে দুইবার চোখের পলক ফেলুন", en: "Blink your eyes twice, slowly" },
   smile: { bn: "ক্যামেরার দিকে তাকিয়ে হাসুন", en: "Smile at the camera" },
-  turnLeft: { bn: "ধীরে মাথা বাঁ দিকে ঘোরান", en: "Slowly turn your head left" },
-  turnRight: { bn: "ধীরে মাথা ডান দিকে ঘোরান", en: "Slowly turn your head right" },
+ turnLeft: { bn: "আস্তে করে বাঁ দিকে তাকান", en: "Gently look to your left" },
+ turnRight: { bn: "আস্তে করে ডান দিকে তাকান", en: "Gently look to your right" },
   nod: { bn: "মাথা একবার উপরে-নিচে করুন", en: "Nod your head up and down once" },
   lookUp: { bn: "মাথা উপরে তুলুন", en: "Tilt your head up" },
   lookDown: { bn: "মাথা নিচে নামান", en: "Tilt your head down" },
