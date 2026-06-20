@@ -403,12 +403,10 @@ function LiveFaceAI() {
         // Stop & assemble the rolling video — keep camera stream alive
         // so retake can re-run the post-pass countdown without redoing challenges.
         const vb = await assembleVideo();
-        if (vb) {
-          setVideoBlob(vb);
-          setVideoUrl(URL.createObjectURL(vb));
-        } else {
-          setVideoBlob(null);
-        }
+        // Silent video: keep Blob in memory for upload; never create a
+        // visible object URL or render <video> for it (Change 2).
+        setVideoBlob(vb ?? null);
+        setVideoUrl(null);
         setStep("result");
       },
       "image/jpeg",
@@ -1964,26 +1962,14 @@ function ResultScreen({
             className="aspect-[3/4] w-full object-cover"
           />
         </div>
-        <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
-          {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              playsInline
-              className="aspect-[3/4] w-full object-cover bg-black"
-            />
-          ) : (
-            <div className="flex aspect-[3/4] w-full items-center justify-center px-4 text-center text-xs text-zinc-400">
-              {tx("videoUnsupported")}
-            </div>
-          )}
-        </div>
       </div>
 
       <p className="text-[11px] text-zinc-500">
-        {tx("videoLabel")} · {imgKB} KB image{videoBlob ? ` · ${vidKB} KB video` : ""}
+        {imgKB} KB image{videoBlob ? ` · ${vidKB} KB video (silent upload)` : ""}
         {!videoSupported && ` · ${tx("videoUnsupported")}`}
       </p>
+      <p className="text-[11px] text-zinc-500">{tx("honestLimits")}</p>
+
 
       {done && (
         <div className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm text-emerald-300 ring-1 ring-emerald-400/30">

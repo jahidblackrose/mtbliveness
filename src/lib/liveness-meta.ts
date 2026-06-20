@@ -93,22 +93,37 @@ function mulberry32(seed: number) {
 
 export function pickChallengesFromNonce(nonce: string, includeVoice = false): ChallengeKind[] {
   const rng = mulberry32(strHash(nonce));
-  // Head movement: one of 4 (turnLeft/turnRight/lookUp/lookDown). Parallax + signed-axis check.
-  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "lookUp", "lookDown"];
-  const head = heads[Math.floor(rng() * heads.length)];
-  // Two easy actions from a pool of 3: blink, smile, mouthOpen.
-  const easyPool: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
-  for (let i = easyPool.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [easyPool[i], easyPool[j]] = [easyPool[j], easyPool[i]];
+  const shuffle = <T>(arr: T[]) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
+  // COMMON pool (Change 1) — pick 3, must include at least one head movement.
+  const common: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+  const heads = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown"]);
+  let commonPicked: ChallengeKind[] = [];
+  // reshuffle until first 3 contain ≥1 head
+  for (let tries = 0; tries < 8; tries++) {
+    shuffle(common);
+    commonPicked = common.slice(0, 3);
+    if (commonPicked.some((k) => heads.has(k))) break;
   }
-  const picked: ChallengeKind[] = [head, easyPool[0], easyPool[1]];
-  for (let i = picked.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [picked[i], picked[j]] = [picked[j], picked[i]];
-  }
-  void includeVoice;
-  return picked;
+
+  // SURPRISE pool — pick 1. readDigits only if voice enabled.
+  const surprisePool: ChallengeKind[] = includeVoice
+    ? ["followDot", "randomSequence", "readDigits"]
+    : ["followDot", "randomSequence"];
+  shuffle(surprisePool);
+  const surprise = surprisePool[0];
+
+  // Insert surprise at a random position 0..3 → final 4 challenges.
+  const insertAt = Math.floor(rng() * 4);
+  const picked = [...commonPicked];
+  picked.splice(insertAt, 0, surprise);
+  return picked.slice(0, 4);
 }
 
 export function digitsFromNonce(nonce: string, n = 4): string {
