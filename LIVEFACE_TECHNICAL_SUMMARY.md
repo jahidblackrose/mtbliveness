@@ -501,5 +501,7 @@ re-derive from the nonce).
   Very wide-angle lenses (e.g. some phones) can shift baselines enough
   that auto-assist kicks in earlier than intended.
 - The geometric face signature is identity-discriminative for
-  near-frontal poses only; we therefore evaluate it during the
-  look-straight hold and at the moment of capture, not mid-turn.
+  near-frontal poses only. The continuous gate therefore only **scores**
+  near-frontal frames and **holds** the last good sim during turns / big
+  expression changes, rather than evaluating every frame.
+
