@@ -1357,12 +1357,27 @@ function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => voi
   );
 }
 
-function StartScreen({ onStart, tx }: { onStart: () => void; tx: Tx }) {
+function StartScreen({
+  onStart,
+  tx,
+  voiceEnabled = false,
+  nonceBound = false,
+}: {
+  onStart: () => void;
+  tx: Tx;
+  voiceEnabled?: boolean;
+  nonceBound?: boolean;
+}) {
   return (
     <section className="space-y-6 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">{tx("startTitle")}</h2>
         <p className="mt-2 text-sm text-zinc-400">{tx("startSubtitle")}</p>
+        {(voiceEnabled || nonceBound) && (
+          <p className="mt-2 text-[11px] text-zinc-500">
+            {nonceBound ? "✓ session-bound" : ""}{nonceBound && voiceEnabled ? " · " : ""}{voiceEnabled ? "🎤 voice on" : ""}
+          </p>
+        )}
       </div>
       <ol className="space-y-3 text-sm">
         {(["step1", "step2", "step3", "step4"] as const).map((k, i) => (
@@ -1385,6 +1400,54 @@ function StartScreen({ onStart, tx }: { onStart: () => void; tx: Tx }) {
     </section>
   );
 }
+
+function ConsentScreen({
+  tx,
+  voiceEnabled,
+  onAccept,
+  onDecline,
+}: {
+  tx: Tx;
+  voiceEnabled: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const [checked, setChecked] = useState(false);
+  return (
+    <section className="space-y-5 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">{tx("consentTitle")}</h2>
+        <p className="mt-2 text-sm text-zinc-300">{tx("consentBody")}</p>
+        {voiceEnabled && (
+          <p className="mt-2 text-sm text-amber-300">{tx("consentBodyVoice")}</p>
+        )}
+      </div>
+      <label className="flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-sm text-zinc-200">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => setChecked(e.target.checked)}
+          className="mt-1 h-4 w-4 accent-emerald-500"
+        />
+        <span>{tx("consentCheckbox")}</span>
+      </label>
+      <div className="flex gap-2">
+        <Button
+          size="lg"
+          onClick={onAccept}
+          disabled={!checked}
+          className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
+        >
+          {tx("consentContinue")}
+        </Button>
+        <Button size="lg" variant="ghost" onClick={onDecline} className="text-zinc-300">
+          {tx("consentDecline")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 
 function LoadingScreen({ tx }: { tx: Tx }) {
   return (
