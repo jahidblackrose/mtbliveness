@@ -33,6 +33,7 @@ import {
   TH,
   DIRECTION,
   resetDirectionCalibration,
+  resetPitchCalibration,
   SpoofGuard,
 } from "@/lib/liveness";
 import {
