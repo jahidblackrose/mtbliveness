@@ -750,6 +750,13 @@ export function updateChallenge(
         done: heldMs >= 250, // MOUTH_OPEN_HOLD_MS
       };
     }
+    case "followDot":
+    case "randomSequence":
+    case "readDigits":
+    default:
+      // Phase B will implement these; for now keep state unchanged so
+      // the function always returns a ChallengeState.
+      return state;
   }
 }
 
