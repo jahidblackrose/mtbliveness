@@ -1766,21 +1766,26 @@ function LivenessScreen({
   else if (captureSeq === "lookStraight") instruction = tx("lookStraight");
   else if (captureSeq === "countdown") instruction = tx("hold");
   else if (captureSeq === "capturing") instruction = tx("capturing");
-  else if (active) instruction = tx(CHALLENGE_KEY[active.kind]);
+  else if (active && displayKind) instruction = tx(CHALLENGE_KEY[displayKind]);
   else instruction = tx("allSet");
 
   let meterLine: string | null = null;
   let meterValue = 0;
-  if (phase === "liveness" && !inCapture && active) {
-    if (active.kind === "blink") {
-      meterLine = tx("blinkProgress", { n: active.blinkCount ?? 0 });
+  if (phase === "liveness" && !inCapture && displayActive) {
+    if (displayKind === "blink") {
+      meterLine = tx("blinkProgress", { n: displayActive.blinkCount ?? 0 });
       meterValue = blinkMeter;
-    } else if (active.kind === "smile") {
-      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("smileHold") : tx("showSmile");
-      meterValue = Math.max(smileMeter, active.smileIntensity ?? 0);
+    } else if (displayKind === "smile") {
+      meterLine = (displayActive.smileHoldStart ?? 0) > 0 ? tx("smileHold") : tx("showSmile");
+      meterValue = Math.max(smileMeter, displayActive.smileIntensity ?? 0);
     } else {
       meterLine = tx("slowSteady");
-      meterValue = Math.max(poseMeter, active.poseProgress ?? 0);
+      meterValue = Math.max(poseMeter, displayActive.poseProgress ?? 0);
+    }
+    if (isSeq && seqActions) {
+      const progress = tx("seqProgress", { n: seqStep + 1, t: 2 });
+      const nextHint = seqStep === 0 ? ` · ${actionShort(seqActions[1], lang)} →` : "";
+      meterLine = `${progress}  ·  ${meterLine ?? ""}${nextHint}`;
     }
   }
 
