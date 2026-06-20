@@ -1304,6 +1304,13 @@ function LiveFaceAI() {
         videoSupported,
         videoMime: recorderMimeRef.current ?? null,
         integrityDecision,
+        identity: {
+          lockedAtMs: identityLockedAtMsRef.current,
+          simMin: simMinRef.current,
+          simAtCapture: lastFrontalSimRef.current,
+          maxSigJump: maxSigJumpRef.current,
+          continuityBreaks: continuityBreaksRef.current,
+        },
         ...(() => {
           // ── SLICE 1+2: PAD risk + upper-body presence (advisory) ──
           const pad = padRef.current;
