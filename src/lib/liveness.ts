@@ -259,7 +259,9 @@ export type ChallengeState = {
   nodPhase?: "neutral" | "down" | "up";
   nodPitchEma?: number;
   nodBasePitch?: number;
-
+  // followDot / randomSequence (Phase B)
+  dotSide?: { x: -1 | 0 | 1; y: -1 | 0 | 1 };
+  seqStep?: 0 | 1;
 };
 
 export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
@@ -750,12 +752,49 @@ export function updateChallenge(
         done: heldMs >= 250, // MOUTH_OPEN_HOLD_MS
       };
     }
-    case "followDot":
-    case "randomSequence":
-    case "readDigits":
+    case "followDot": {
+      // Pass when yaw/pitch trend matches dot's side (stored on state.dotSide).
+      // dotSide encoded as {x:-1|0|1, y:-1|0|1}; host overlay sets it each tick.
+      const side = state.dotSide ?? { x: 0, y: 0 };
+      const dy = m.yaw - baseline.yaw; // +ve = user's right
+      const dp = m.pitch - baseline.pitch; // sign depends on PITCH.UP_SIGN
+      const axisMin = 0.12; // CONFIG.FOLLOW_DOT_AXIS_MIN
+      const yawMatch = side.x !== 0 && Math.sign(dy) === side.x && Math.abs(dy) > axisMin * mul;
+      const pitchMatch = side.y !== 0 && Math.sign(dp) === side.y * PITCH.UP_SIGN * -1 && Math.abs(dp) > axisMin * mul;
+      const matching = yawMatch || pitchMatch;
+      const holdStart = matching ? state.smileHoldStart ?? now : 0;
+      return { ...state, smileHoldStart: holdStart, done: matching && now - (holdStart || now) >= 700 };
+    }
+    case "randomSequence": {
+      // Composite: blink → smile. Track sub-step in seqStep (0 = need blink, 1 = need smile).
+      const step = state.seqStep ?? 0;
+      if (step === 0) {
+        // delegate to blink logic by reusing blink fields
+        const signal = m.blinkMax;
+        const prev = state.blinkEma ?? signal;
+        const ema = prev * 0.6 + signal * 0.4;
+        const closed = ema > (TH.BLINK_ABS * mul);
+        if (closed && state.blinkPhase !== "closed") {
+          return { ...state, blinkEma: ema, blinkPhase: "closed", seqStep: 1 };
+        }
+        return { ...state, blinkEma: ema };
+      } else {
+        const signal = m.smileMax ?? 0;
+        const prev = state.smileEma ?? signal;
+        const ema = prev * 0.6 + signal * 0.4;
+        const above = ema > (TH.SMILE_ABS * mul);
+        const holdStart = above ? state.smileHoldStart ?? now : 0;
+        return { ...state, smileEma: ema, smileHoldStart: holdStart, done: above && now - (holdStart || now) >= TH.SMILE_HOLD_MS };
+      }
+    }
+    case "readDigits": {
+      // Advisory; real ASR happens server-side. Mark done after a 2.5s presence
+      // hold so the user has time to read the digits aloud.
+      const present = m.faceSize > TH.FACE_SIZE_MIN;
+      const holdStart = present ? state.smileHoldStart ?? now : 0;
+      return { ...state, smileHoldStart: holdStart, done: present && now - (holdStart || now) >= 2500 };
+    }
     default:
-      // Phase B will implement these; for now keep state unchanged so
-      // the function always returns a ChallengeState.
       return state;
   }
 }
