@@ -43,6 +43,14 @@ import {
   t,
 } from "@/lib/liveness-i18n";
 import { ChallengeDemo } from "@/components/challenge-demo";
+import { getPoseDetector, analyseShoulders, type UpperBodyInfo } from "@/lib/liveness-pose";
+import {
+  moireEnergy,
+  flickerScore,
+  replayRiskScore,
+  activeFlags,
+  type SpoofFlag,
+} from "@/lib/liveness-pad";
 
 export const Route = createFileRoute("/liveface")({
   ssr: false,
@@ -191,6 +199,29 @@ function LiveFaceAI() {
 
   const [fps, setFps] = useState(0);
   const fpsAccumRef = useRef<{ frames: number; lastReport: number }>({ frames: 0, lastReport: 0 });
+
+  // ── PAD / replay risk (SLICE 1) ──
+  const padRef = useRef({
+    brightnessHist: [] as number[],
+    moire: 0,
+    flicker: 0,
+    planar: 0, // proxy via SpoofGuard flat-surface flag for now
+    frame: 0,
+  });
+  // ── Pose / shoulder gate (SLICE 2) ──
+  const poseRef = useRef<{
+    frame: number;
+    cadence: number;
+    enabled: boolean;
+    info: UpperBodyInfo | null;
+    loading: boolean;
+  }>({
+    frame: 0,
+    cadence: CONFIG.POSE_SAMPLE_EVERY_N,
+    enabled: CONFIG.SHOULDER_GATE,
+    info: null,
+    loading: false,
+  });
 
   const [devOpen, setDevOpen] = useState(false);
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
