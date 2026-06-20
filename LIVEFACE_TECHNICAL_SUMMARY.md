@@ -19,7 +19,11 @@ challenge each decision.
 ```
 URL params ─▶ Consent ─▶ Camera + Model ─▶ Framing gate ─▶ Calibration
         ▼
- Challenge 1 ─▶ Challenge 2 ─▶ Challenge 3   (fail-forward; locked once passed)
+ Identity reference locked at end of calibration
+        ▼
+ Challenge 1 ─▶ Challenge 2 ─▶ Challenge 3 ─▶ Challenge 4
+   (2 easy + 1 single easy head turn + 1 surprise; fail-forward; locked once passed)
+   (identity compared CONTINUOUSLY on near-frontal frames between & during challenges)
         ▼
  Post-pass integrity gate (same face? face-swap? mismatch?)
         ▼
@@ -28,7 +32,10 @@ URL params ─▶ Consent ─▶ Camera + Model ─▶ Framing gate ─▶ Calib
  Stop 10-s rolling video buffer ─▶ assemble WebM ─▶ in-app preview
         ▼
  Build meta JSON (hashes, device, camera, timeline, scores) ─▶ POST multipart
+
+ Retake: always re-runs the FULL flow (all challenges again, never skip).
 ```
+
 
 Each step is described below.
 
@@ -185,103 +192,105 @@ identity reference for the post-pass integrity gate.
 
 ### 8.1 Selection
 
-Three challenges per session: exactly one head movement
-(`turnLeft | turnRight | nod`) plus `blink` + `smile`, then Fisher-Yates
-shuffled. If a `nonce` is present we seed a deterministic PRNG
+**Four** challenges per session, nonce-seeded order:
+
+- **2 easy** picks from `{ blink, smile, mouthOpen }` (no duplicates).
+- **1 single easy head turn**: either `turnLeft` **or** `turnRight` (never
+  both, never paired together — only one head movement per session, to
+  preserve a single parallax / depth cue without overburdening the user).
+- **1 surprise** from `{ randomSequence }` (+ `readDigits` when
+  `voice=1`). `followDot`, `lookUp`, `lookDown`, and `nod` are **removed**
+  from all selection pools (kept behind disabled `CHALLENGE_FLAGS` only).
+
+If a `nonce` is present we seed a deterministic PRNG
 (`mulberry32(FNV-1a(nonce))`) so the same nonce always yields the same
-order — the server can therefore predict (and verify) what the user was
-asked to do.
+4-tuple and order — the server can predict and verify what the user was
+asked to do (`pickChallengesFromNonce` in `liveness-meta.ts`).
 
 ### 8.2 Blink (`updateChallenge` case `"blink"`)
 
-Signal: `blinkMax`, EMA-smoothed (`α = 0.6` on new sample).
-Two-track threshold (relative OR absolute fires):
+Signal: `blinkMax`, EMA-smoothed (`α = 0.6`). Two-track threshold:
 
 - closed-state enter: `ema > baseline.blinkOpen + 0.20` **or** `ema > 0.45`
 - open-state re-enter: `ema < baseline.blinkOpen + 0.08` **and** `ema < 0.30`
 
-State machine `open → closed → open` increments a counter; a refractory
-window (`BLINK_REFRACTORY_MS = 150 ms`) prevents one blink from being
-double-counted. The challenge passes when `count ≥ 2` blinks.
+State machine `open → closed → open` increments a counter; refractory
+window `BLINK_REFRACTORY_MS = 150 ms` prevents double-counting. Passes
+when `count ≥ 2`.
 
 ### 8.3 Smile (`updateChallenge` case `"smile"`)
 
-Signal: `smileMax`, EMA-smoothed. Passes if **either**
-`rise > 0.10` (above neutral) **or** `ema > 0.30` (absolute) holds for
-`SMILE_HOLD_MS = 180 ms`, **and** `jawOpen < 0.7` (rejects talking/yawn).
-A `smileIntensity` 0..1 drives the live meter.
+Signal: `smileMax`, EMA-smoothed. Passes if **either** `rise > 0.10`
+**or** `ema > 0.30` holds for `SMILE_HOLD_MS = 180 ms`, **and**
+`jawOpen < 0.7` (rejects talking/yawn).
 
-### 8.4 Head-turn (LEFT/RIGHT) — SIGNED, axis-dominant
+### 8.4 Mouth-open (`updateChallenge` case `"mouthOpen"`)
 
-Implemented in `inspectHeadGesture`:
+Signal: `jawOpen`. Passes on a sustained open beyond baseline neutral.
+Replaces `nod` as the "third easy" option.
 
-```
-yawChange   = (m.yaw - baseline.yaw) * YAW_LEFT_SIGN
-pitchChange =  m.pitch - baseline.pitch
+### 8.5 Head-turn (LEFT/RIGHT) — eased, nose-authoritative
 
-dominantAxis = "yaw"   if yawChange² >  1.05 · pitchChange²
-               "pitch" if pitchChange² > 1.05 · yawChange²
-               "none"  otherwise
-
-targetDir = +1 (turnLeft)  or  -1 (turnRight)
-correctAxis = dominantAxis == "yaw"
-correctSign = yawChange * targetDir  >  YAW_TURN_ABS   (default 0.20)
-pass        = startedNearNeutral && correctAxis && correctSign
-```
-
-Key properties:
-
-- The pass condition uses **signed** yaw — turning the *wrong* direction
-  with the same magnitude **does not** pass. The previous bug where any
-  movement passed both `turnLeft` and `turnRight` is structurally fixed.
-- Axis dominance gate: a diagonal head movement that crosses the yaw
-  threshold but is mostly pitch is rejected (`wrongHint: "wrongDir"`).
-- `startedNearNeutral` requires the user to be in their resting pose
-  **before** the gesture starts, so an already-turned head doesn't
-  silently auto-pass.
-
-### 8.5 Mirror / sign self-calibration (`calibrateYawSignFromNose`)
-
-Selfie video is CSS-mirrored (`scaleX(-1)`) for user comfort. Landmarks
-themselves are **not** mirrored, but device/model variance can flip the
-sign of `yaw` for "user's left". On the first turn we cross-check:
-
-- `noseChange = (m.noseDx - baseline.noseDx) * NOSE_LEFT_SIGN` —
-  in the unmirrored landmark space, the nose moves toward image-right
-  (`x` increases) when the user turns to their physical left, so the
-  reference sign is `+1`.
-- If the nose says "user is turning toward the prompt direction" but
-  the signed yaw says "user is turning the opposite way", we flip
-  `YAW_LEFT_SIGN` once for the session and mark calibration done.
-- Pass still depends on canonical signed yaw — nose offset only votes
-  on what "their left" means.
-
-### 8.6 Nod (PITCH only)
+Implemented in `inspectHeadGesture`. Defaults relaxed from earlier
+versions: `YAW_TURN_ABS = 0.12` (was 0.20), `NOSE_TURN_ABS = 0.10`
+(was 0.16), `nearNeutral` multiplier raised 0.35 → 0.7 so the user does
+not need to be perfectly centered before starting.
 
 ```
-correctAxis = dominantAxis == "pitch"
-correctSign = |pitchChange| > PITCH_NOD_ABS   (default 0.18)
-pass        = startedNearNeutral && correctAxis && correctSign
+yawChange   = (m.yaw   - baseline.yaw)   * YAW_LEFT_SIGN
+noseChange  = (m.noseDx - baseline.noseDx) * NOSE_LEFT_SIGN
+targetDir   = +1 (turnLeft) | -1 (turnRight)
+
+yawVote   = yawChange  * targetDir  >  YAW_TURN_ABS
+noseVote  = noseChange * targetDir  >  NOSE_TURN_ABS
+pass      = startedNearNeutral && (yawVote || noseVote)
 ```
 
-If the user turns sideways while we asked for a nod, `wrongHint =
-"nodNotSide"` and the UI surfaces a bilingual hint
-("মাথা উপরে-নিচে করুন, পাশে নয়" / "Move your head up and down, not sideways").
+- **Nose is authoritative for direction.** `wrongDir` is only surfaced
+  when the *nose* confirms the opposite-side movement; a noisy yaw sign
+  alone never raises "wrong direction".
+- Single easy turn only — `nod` is no longer selected.
 
-### 8.7 Auto-assist
+### 8.6 Mirror / sign self-calibration (`calibrateYawSignFromNose`)
 
-After `ASSIST_AFTER_MS = 2500 ms` on the current challenge, all numeric
-thresholds for that challenge are multiplied by `ASSIST_FACTOR = 0.65`
-(easier). This only helps users struggling with calibration; it does not
-remove the sign / axis-dominance gates.
+Selfie video is CSS-mirrored (`scaleX(-1)`); landmarks are not.
+`YAW_LEFT_SIGN` is **locked from the first confident nose movement**
+(nose is the ground truth for "user's left"). If signed yaw disagrees
+with nose direction, `YAW_LEFT_SIGN` is flipped once for the session.
+This eliminates the "wrong direction" failure caused by yaw sign drift.
 
-### 8.8 Fail-forward semantics
+### 8.7 Random sequence (surprise challenge)
 
-- Passed challenges are **locked**. A failure (wrong action, timeout)
-  only retries the *current* challenge, never the earlier ones.
-- A challenge has `CHALLENGE_TIMEOUT_MS = 20 000 ms` (30 000 in easy
-  mode). On timeout we offer a retry up to `MAX_ATTEMPTS = 3`.
-- The whole session caps at `SESSION_TIMEOUT_MS = 120 000 ms`.
+A nonce-seeded ordered pair of two easy actions (e.g. "Blink, then
+Smile"). Picked by `pickSeqActions` / `seqActionsFromNonce`, which:
+
+- draws both steps from `{ blink, smile, mouthOpen }` (head moves never
+  appear inside a sequence — they're reserved for the dedicated turn
+  slot);
+- the pair and order are deterministic from the nonce, so the server
+  re-derives and verifies them;
+- the UI shows fully-rendered, localized labels (no `{a}`/`{b}` template
+  leaks) plus animated demos for each sub-step;
+- meta records `randomSequence = { steps: [a,b], completedInOrder }`.
+
+### 8.8 Auto-assist
+
+After `ASSIST_AFTER_MS = 2500 ms` on the current challenge, numeric
+thresholds for that challenge are multiplied by `ASSIST_FACTOR = 0.65`.
+Sign / axis-dominance gates are not removed.
+
+### 8.9 Fail-forward semantics
+
+- Passed challenges are **locked**. A failure only retries the current
+  challenge, never earlier ones.
+- `CHALLENGE_TIMEOUT_MS = 20 000 ms` (30 000 ms in easy mode), up to
+  `MAX_ATTEMPTS = 3` per challenge.
+- Whole session capped at `SESSION_TIMEOUT_MS = 120 000 ms`.
+- **Retake always restarts the full flow** — all 4 challenges run
+  again, then capture. Already-passed challenges are *not* skipped to a
+  direct re-shutter.
+
+
 
 ---
 
@@ -304,11 +313,12 @@ an otherwise-passing turn that lacks 3-D structure.
 
 ---
 
-## 10. Post-pass integrity gate (`FaceSignature`)
+## 10. Continuous identity gate (`FaceSignature`)
 
-Goal: between "all challenges passed" and "shutter fires" we must
-guarantee the **same person** is in the frame. We compute a small,
-view-stable geometric signature:
+Goal: from the **end of calibration** through to the **shutter** we must
+guarantee the **same person** is in the frame — including *between* and
+*during* challenges, to close the inter-challenge face-swap gap. We
+compute a small, view-stable geometric signature:
 
 ```
 S = {
@@ -323,16 +333,20 @@ Similarity:
 `sim = 1 − 2.5 · mean(rel_diff_i)` clamped to `[0,1]`,
 where `rel_diff(x,y) = |x-y| / mean(|x|,|y|)`.
 
-- `INTEGRITY.SIM_PASS = 0.62` — sustained dip below this for
-  `FAIL_SUSTAIN_MS = 700 ms` after all challenges pass → face-changed,
-  full restart from challenge 1 with a bilingual notice.
-- `INTEGRITY.SIM_CAPTURE = 0.58` — hard gate at the moment of capture.
-  Below this we abort the capture and restart.
+- The reference is **locked at the end of calibration** (average of 3–5
+  baseline samples) and is the same reference used from that point on.
+- Comparison runs **continuously** from then until capture. A sustained
+  dip below `INTEGRITY.SIM_PASS = 0.62` for `FAIL_SUSTAIN_MS = 700 ms`
+  triggers a **full restart from challenge 1** with a bilingual notice.
+- `INTEGRITY.SIM_CAPTURE = 0.58` is a hard gate at the shutter.
+- **Pose robustness.** The signature is only evaluated on **near-frontal
+  frames**; during head turns, mouth-open, big smiles, etc., we **hold
+  the last good sim** rather than letting normal expression/pose changes
+  falsely trip an identity restart.
 - If the same face leaves and returns within tolerance, the 3-2-1
   countdown pauses then resumes (no penalty for blinking out).
 
-The reference signature is the average of the calibration-window
-signatures, refreshed each time the user reaches the look-straight hold.
+
 
 ---
 
@@ -375,10 +389,13 @@ audio), and a `meta` JSON form field with at least:
   "expiresAt":        1718900120000,
   "nonceStale":       false,
   "consent": { "accepted": true, "version": "v1", "acceptedAt": 1718900001000 },
-  "challengeOrder":   ["turnLeft","blink","smile"],
+  "challengeOrder":   ["blink","turnLeft","smile","randomSequence"],
   "challengeTimeline": [
-    {"kind":"turnLeft","startedAt":1718900010000,"finishedAt":1718900012400,"attempts":1,"passed":true},
-    ...
+    {"kind":"blink","startedAt":1718900010000,"finishedAt":1718900011200,"attempts":1,"passed":true},
+    {"kind":"turnLeft","startedAt":1718900011200,"finishedAt":1718900013400,"attempts":1,"passed":true},
+    {"kind":"smile","startedAt":1718900013400,"finishedAt":1718900014800,"attempts":1,"passed":true},
+    {"kind":"randomSequence","startedAt":1718900014800,"finishedAt":1718900017900,"attempts":1,"passed":true,
+     "meta":{"randomSequence":{"steps":["blink","mouthOpen"],"completedInOrder":true}}}
   ],
   "easyMode":         false,
   "attempts":         1,
@@ -387,7 +404,9 @@ audio), and a `meta` JSON form field with at least:
   "depth":            { "method": "blendshape-z-variance", "score": 0.71, "compliant": true },
   "parallax":         { "ok": true, "deltaNoseZ": 0.019 },
   "spoofFlags":       [],     // ["flat-surface", "no-motion", ...]
-  "identity":         { "simAtCapture": 0.83, "simMin": 0.71 },
+  "identity":         { "simAtCapture": 0.83, "simMin": 0.71, "continuous": true,
+                        "referenceLockedAt": "calibration-end" },
+
   "device":           { "userAgent": "...", "platform": "...", "language": "...", "timezone": "Asia/Dhaka",
                         "screen": {"w":1920,"h":1080,"dpr":1.25} },
   "camera":           { "label": "FaceTime HD Camera", "virtualCameraSuspected": false,
@@ -482,5 +501,7 @@ re-derive from the nonce).
   Very wide-angle lenses (e.g. some phones) can shift baselines enough
   that auto-assist kicks in earlier than intended.
 - The geometric face signature is identity-discriminative for
-  near-frontal poses only; we therefore evaluate it during the
-  look-straight hold and at the moment of capture, not mid-turn.
+  near-frontal poses only. The continuous gate therefore only **scores**
+  near-frontal frames and **holds** the last good sim during turns / big
+  expression changes, rather than evaluating every frame.
+
