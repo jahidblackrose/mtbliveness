@@ -214,14 +214,14 @@ export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod"
 
 
 export function pickChallenges(): ChallengeKind[] {
-  // 3 challenges total. Always include at least one head movement (parallax
-  // check). The remaining two are easier expression actions. Order randomized
-  // per session as an anti-replay measure.
-  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "nod"];
+  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "lookUp", "lookDown"];
   const head = heads[Math.floor(Math.random() * heads.length)];
-  // Two easy actions — blink and smile are both comfortable.
-  const picked: ChallengeKind[] = [head, "blink", "smile"];
-  // Fisher–Yates shuffle for random order.
+  const easyPool: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  for (let i = easyPool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [easyPool[i], easyPool[j]] = [easyPool[j], easyPool[i]];
+  }
+  const picked: ChallengeKind[] = [head, easyPool[0], easyPool[1]];
   for (let i = picked.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [picked[i], picked[j]] = [picked[j], picked[i]];
