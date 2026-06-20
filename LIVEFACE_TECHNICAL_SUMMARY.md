@@ -19,7 +19,11 @@ challenge each decision.
 ```
 URL params ─▶ Consent ─▶ Camera + Model ─▶ Framing gate ─▶ Calibration
         ▼
- Challenge 1 ─▶ Challenge 2 ─▶ Challenge 3   (fail-forward; locked once passed)
+ Identity reference locked at end of calibration
+        ▼
+ Challenge 1 ─▶ Challenge 2 ─▶ Challenge 3 ─▶ Challenge 4
+   (2 easy + 1 single easy head turn + 1 surprise; fail-forward; locked once passed)
+   (identity compared CONTINUOUSLY on near-frontal frames between & during challenges)
         ▼
  Post-pass integrity gate (same face? face-swap? mismatch?)
         ▼
@@ -28,7 +32,10 @@ URL params ─▶ Consent ─▶ Camera + Model ─▶ Framing gate ─▶ Calib
  Stop 10-s rolling video buffer ─▶ assemble WebM ─▶ in-app preview
         ▼
  Build meta JSON (hashes, device, camera, timeline, scores) ─▶ POST multipart
+
+ Retake: always re-runs the FULL flow (all challenges again, never skip).
 ```
+
 
 Each step is described below.
 
