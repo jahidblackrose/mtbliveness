@@ -450,12 +450,15 @@ function LiveFaceAI() {
       });
       landmarkerRef.current = landmarker;
 
+      const wantAudio = sessionParamsRef.current.enableVoice === true;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
+        audio: wantAudio,
       });
       streamRef.current = stream;
+      cameraInspectionRef.current = inspectCamera(stream);
       startRecorder(stream);
+
 
       // Reset captured payload
       setImageBlob(null);
