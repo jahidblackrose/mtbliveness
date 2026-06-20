@@ -289,14 +289,25 @@ export type ChallengeState = {
 // Pool of single-action challenges eligible for the random sequence pair.
 // Excludes composites (followDot/randomSequence/readDigits) and nod (too similar
 // to lookUp/lookDown for a sub-step).
-const SEQ_POOL: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+// Prefer EASY actions; head moves are eligible but we avoid pairing two head moves.
+const SEQ_EASY: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+const SEQ_HEAD: ChallengeKind[] = ["turnLeft", "turnRight"];
+const HEAD_SET = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown", "nod"]);
 export function pickSeqActions(rng: () => number = Math.random): [ChallengeKind, ChallengeKind] {
-  const arr = [...SEQ_POOL];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+  const pick = <T,>(arr: T[]) => arr[Math.floor(rng() * arr.length)];
+  // First sub-step: always easy. Second: 70% easy / 30% head — never two head moves.
+  const first = pick(SEQ_EASY);
+  const useHeadSecond = rng() < 0.3;
+  let second: ChallengeKind;
+  if (useHeadSecond) {
+    second = pick(SEQ_HEAD);
+  } else {
+    const remaining = SEQ_EASY.filter((k) => k !== first);
+    second = pick(remaining.length ? remaining : SEQ_EASY);
   }
-  return [arr[0], arr[1]];
+  // Safety: never two head moves.
+  if (HEAD_SET.has(first) && HEAD_SET.has(second)) second = pick(SEQ_EASY);
+  return [first, second];
 }
 
 export function newChallengeState(
