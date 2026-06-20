@@ -254,6 +254,9 @@ export const CHALLENGE_KEY: Record<ChallengeKind, StringKey> = {
   lookUp: "lookUp",
   lookDown: "lookDown",
   mouthOpen: "mouthOpen",
+  followDot: "followDot",
+  randomSequence: "randomSeq",
+  readDigits: "sayDigits",
 };
 
 export const GUIDANCE_KEY: Record<GuidanceKey, StringKey> = {

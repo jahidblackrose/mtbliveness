@@ -210,7 +210,7 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 // ─────────────────────────────────────────────────────────────────────────────
 // Challenges
 // ─────────────────────────────────────────────────────────────────────────────
-export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen";
+export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "followDot" | "randomSequence" | "readDigits";
 
 
 export function pickChallenges(): ChallengeKind[] {
