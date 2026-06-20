@@ -213,6 +213,9 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "followDot" | "randomSequence" | "readDigits";
 
 
+// Config flag: include lookUp/lookDown/followDot in default pool (off by default — harder/finickier).
+export const CHALLENGE_FLAGS = { enablePitchHead: false, enableFollowDot: false };
+
 export function pickChallenges(): ChallengeKind[] {
   const shuffle = <T,>(arr: T[]) => {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -221,24 +224,29 @@ export function pickChallenges(): ChallengeKind[] {
     }
     return arr;
   };
-  // 3 from common pool with ≥1 head movement
-  const common: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
-  const heads = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown"]);
-  let commonPicked: ChallengeKind[] = [];
-  for (let tries = 0; tries < 8; tries++) {
-    shuffle(common);
-    commonPicked = common.slice(0, 3);
-    if (commonPicked.some((k) => heads.has(k))) break;
-  }
-  // 1 surprise
-  const surprisePool: ChallengeKind[] = ["followDot", "randomSequence"];
+  // Easy actions: pick 3 from {blink, smile, mouthOpen}.
+  const easy: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  shuffle(easy);
+  const easyPicked = easy.slice(0, 3);
+
+  // Exactly ONE head movement — the easiest kind only: a single small turn.
+  const headPool: ChallengeKind[] = CHALLENGE_FLAGS.enablePitchHead
+    ? ["turnLeft", "turnRight", "lookUp", "lookDown"]
+    : ["turnLeft", "turnRight"];
+  shuffle(headPool);
+  const head = headPool[0];
+
+  // Surprise: prefer randomSequence; followDot only behind a flag.
+  const surprisePool: ChallengeKind[] = CHALLENGE_FLAGS.enableFollowDot
+    ? ["randomSequence", "followDot"]
+    : ["randomSequence"];
   shuffle(surprisePool);
   const surprise = surprisePool[0];
-  // Insert surprise at random position → 4 challenges total
-  const insertAt = Math.floor(Math.random() * 4);
-  const picked = [...commonPicked];
-  picked.splice(insertAt, 0, surprise);
-  return picked.slice(0, 4);
+
+  // Order: 2 easy + 1 head + 1 surprise, shuffled.
+  const base: ChallengeKind[] = [easyPicked[0], easyPicked[1], head, surprise];
+  shuffle(base);
+  return base.slice(0, 4);
 }
 
 
@@ -281,14 +289,25 @@ export type ChallengeState = {
 // Pool of single-action challenges eligible for the random sequence pair.
 // Excludes composites (followDot/randomSequence/readDigits) and nod (too similar
 // to lookUp/lookDown for a sub-step).
-const SEQ_POOL: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+// Prefer EASY actions; head moves are eligible but we avoid pairing two head moves.
+const SEQ_EASY: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+const SEQ_HEAD: ChallengeKind[] = ["turnLeft", "turnRight"];
+const HEAD_SET = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown", "nod"]);
 export function pickSeqActions(rng: () => number = Math.random): [ChallengeKind, ChallengeKind] {
-  const arr = [...SEQ_POOL];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+  const pick = <T,>(arr: T[]) => arr[Math.floor(rng() * arr.length)];
+  // First sub-step: always easy. Second: 70% easy / 30% head — never two head moves.
+  const first = pick(SEQ_EASY);
+  const useHeadSecond = rng() < 0.3;
+  let second: ChallengeKind;
+  if (useHeadSecond) {
+    second = pick(SEQ_HEAD);
+  } else {
+    const remaining = SEQ_EASY.filter((k) => k !== first);
+    second = pick(remaining.length ? remaining : SEQ_EASY);
   }
-  return [arr[0], arr[1]];
+  // Safety: never two head moves.
+  if (HEAD_SET.has(first) && HEAD_SET.has(second)) second = pick(SEQ_EASY);
+  return [first, second];
 }
 
 export function newChallengeState(
@@ -316,10 +335,10 @@ export const TH = {
   FACE_SIZE_MIN: 0.28,
   FACE_SIZE_MAX: 0.9,
   BRIGHT_MIN: 40,
-  // Head turn — ~11° momentary cross.
-  YAW_TURN: 0.20,
-  YAW_TURN_ABS: 0.20,
-  NOSE_TURN_ABS: 0.16,
+  // Head turn — small/comfortable: ~7° momentary cross. Nose is the authoritative direction signal.
+  YAW_TURN: 0.12,
+  YAW_TURN_ABS: 0.12,
+  NOSE_TURN_ABS: 0.10,
   // Nod ~10–12°
   PITCH_NOD: 0.18,
   PITCH_NOD_ABS: 0.18,
@@ -378,9 +397,9 @@ export function setEasyMode(on: boolean) {
     TH.BLINK_HIGH_OFFSET = 0.15;
     TH.BLINK_LOW_OFFSET = 0.06;
     TH.BLINK_ABS = 0.35;
-    TH.YAW_TURN = 0.16;
-    TH.YAW_TURN_ABS = 0.16;
-    TH.NOSE_TURN_ABS = 0.13;
+    TH.YAW_TURN = 0.10;
+    TH.YAW_TURN_ABS = 0.10;
+    TH.NOSE_TURN_ABS = 0.08;
     TH.PITCH_NOD = 0.13;
     TH.PITCH_NOD_ABS = 0.13;
     TH.NOSE_NOD_ABS = 0.07;
@@ -392,9 +411,9 @@ export function setEasyMode(on: boolean) {
     TH.BLINK_HIGH_OFFSET = 0.20;
     TH.BLINK_LOW_OFFSET = 0.08;
     TH.BLINK_ABS = 0.45;
-    TH.YAW_TURN = 0.22;
-    TH.YAW_TURN_ABS = 0.22;
-    TH.NOSE_TURN_ABS = 0.18;
+    TH.YAW_TURN = 0.12;
+    TH.YAW_TURN_ABS = 0.12;
+    TH.NOSE_TURN_ABS = 0.10;
     TH.PITCH_NOD = 0.18;
     TH.PITCH_NOD_ABS = 0.18;
     TH.NOSE_NOD_ABS = 0.10;
@@ -431,8 +450,9 @@ function axisDominance(yawChange: number, pitchChange: number): DominantAxis {
 }
 
 function nearNeutral(yawChange: number, pitchChange: number, yawTh: number, pitchTh: number) {
-  const yawNeutral = yawTh * 0.35;
-  const pitchNeutral = pitchTh * 0.35;
+  // Relaxed: user doesn't need to be perfectly centered before turning.
+  const yawNeutral = yawTh * 0.7;
+  const pitchNeutral = pitchTh * 0.7;
   return square(yawChange) <= square(yawNeutral) && square(pitchChange) <= square(pitchNeutral);
 }
 
@@ -458,26 +478,21 @@ function calibrateYawSignFromNose(
   baseline: Baseline,
   targetDir: 1 | -1,
   yawTh: number,
-  pitchTh: number,
+  _pitchTh: number,
 ) {
   if (DIRECTION.calibratedYaw) return;
   const rawYawChange = m.yaw - baseline.yaw;
-  const yawChange = rawYawChange * DIRECTION.YAW_LEFT_SIGN;
-  const pitchChange = m.pitch - baseline.pitch;
-  const noseChange = (m.noseDx - baseline.noseDx) * DIRECTION.NOSE_LEFT_SIGN;
+  const noseChangeRaw = m.noseDx - baseline.noseDx;
+  const noseChange = noseChangeRaw * DIRECTION.NOSE_LEFT_SIGN;
   const noseTh = TH.NOSE_TURN_ABS;
 
-  // Use nose offset only as a sign reference for mirrored/device variance.
-  // Passing still depends on canonical signed yaw only.
+  // Nose is the AUTHORITATIVE direction signal. As soon as nose moves clearly
+  // toward the requested direction, align YAW_LEFT_SIGN with the nose verdict.
   const noseSupportsPrompt = noseChange * targetDir > noseTh;
-  const yawOpposesPrompt = yawChange * targetDir < -yawTh * 0.5;
-  const yawSupportsPrompt = yawChange * targetDir > yawTh;
-  const horizontalEnough = square(yawChange) > square(pitchChange) && square(noseChange) > square(noseTh);
-
-  if (horizontalEnough && noseSupportsPrompt && yawOpposesPrompt) {
-    DIRECTION.YAW_LEFT_SIGN = (DIRECTION.YAW_LEFT_SIGN * -1) as 1 | -1;
-    DIRECTION.calibratedYaw = true;
-  } else if (horizontalEnough && yawSupportsPrompt && square(pitchChange) < square(pitchTh)) {
+  if (noseSupportsPrompt && Math.abs(rawYawChange) > yawTh * 0.4) {
+    // The sign that rawYawChange*sign agrees with targetDir.
+    const wantSign = (rawYawChange * targetDir > 0 ? 1 : -1) as 1 | -1;
+    DIRECTION.YAW_LEFT_SIGN = wantSign;
     DIRECTION.calibratedYaw = true;
   }
 }
@@ -491,10 +506,12 @@ export function inspectHeadGesture(
 ): HeadGestureDebug {
   const yawTh = TH.YAW_TURN_ABS * mul;
   const pitchTh = TH.PITCH_NOD_ABS * mul;
+  const noseTh = TH.NOSE_TURN_ABS * mul;
   const signedYaw = m.yaw * DIRECTION.YAW_LEFT_SIGN;
   const signedPitch = m.pitch;
   const yawChange = (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN;
   const pitchChange = m.pitch - baseline.pitch;
+  const noseChange = (m.noseDx - baseline.noseDx) * DIRECTION.NOSE_LEFT_SIGN;
   const dominantAxis = axisDominance(yawChange, pitchChange);
   const resolved = resolvedGesture(yawChange, pitchChange, yawTh, pitchTh, dominantAxis);
 
@@ -505,11 +522,19 @@ export function inspectHeadGesture(
 
   if (requested === "turnLeft" || requested === "turnRight") {
     const targetDir = requested === "turnLeft" ? 1 : -1;
-    correctAxis = dominantAxis === "yaw";
-    correctSign = yawChange * targetDir > yawTh;
+    // Vote from nose (authoritative) and from signed yaw.
+    const noseVote = noseChange * targetDir > noseTh;
+    const yawVote = yawChange * targetDir > yawTh;
+    // Pass on EITHER, with axis not dominated by pitch.
+    correctAxis = dominantAxis !== "pitch";
+    correctSign = noseVote || yawVote;
     pass = startedNearNeutral && correctAxis && correctSign;
-    if (!pass && dominantAxis === "yaw" && yawChange * -targetDir > yawTh) wrongHint = "turnOtherWay";
-    else if (!pass && resolved !== "none") wrongHint = "wrongDir";
+    if (!pass) {
+      // Only claim "wrong direction" when the NOSE confirms it (don't lie when yaw sign drifted).
+      const noseWrong = noseChange * -targetDir > noseTh;
+      if (noseWrong) wrongHint = "turnOtherWay";
+      else if (dominantAxis === "pitch" && Math.abs(pitchChange) > pitchTh) wrongHint = "nodNotSide";
+    }
   } else if (requested === "nod") {
     correctAxis = dominantAxis === "pitch";
     correctSign = pitchChange > pitchTh || -pitchChange > pitchTh;
