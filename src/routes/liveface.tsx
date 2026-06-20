@@ -59,8 +59,20 @@ export const Route = createFileRoute("/liveface")({
 });
 
 import { API_ENDPOINT, API_KEY, CONFIG } from "@/lib/liveness-config";
+import {
+  sha256Blob,
+  collectDeviceInfo,
+  inspectCamera,
+  pickChallengesFromNonce,
+  digitsFromNonce,
+  readSessionFromUrl,
+  isNonceStale,
+  type SessionParams,
+  type CameraInspection,
+} from "@/lib/liveness-meta";
 
-type Step = "start" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error";
+type Step = "start" | "consent" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error" | "blocked";
+
 
 
 function pickVideoMime(): string | undefined {
@@ -121,9 +133,24 @@ function LiveFaceAI() {
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const sessionMetaRef = useRef<{ sessionId: string; startedAt: number } | null>(null);
+
+  // ── Session binding (host-provided nonce + voice flag, from URL) ──
+  const sessionParamsRef = useRef<SessionParams>({
+    nonce: null, nonceIssuedAt: null, expiresAt: null, challengesFromHost: null, enableVoice: false,
+  });
+  const consentRef = useRef<{ given: boolean; timestamp: number | null; textVersion: string }>({
+    given: false, timestamp: null, textVersion: CONFIG.CONSENT_TEXT_VERSION,
+  });
+  const sessionAttemptsRef = useRef<number>(0);
+  const challengeTimelineRef = useRef<{ idx: number; kind: string; startedAt: number; completedAt: number | null }[]>([]);
+  const cameraInspectionRef = useRef<CameraInspection | null>(null);
+  const digitsRef = useRef<string>("");
+  const [digitsForVoice, setDigitsForVoice] = useState<string>("");
+
   type SubmitState = "idle" | "uploading" | "ok" | "fail";
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [submitError, setSubmitError] = useState<string>("");
+
 
   const framingHoldStartRef = useRef<number | null>(null);
 
@@ -166,6 +193,18 @@ function LiveFaceAI() {
 
   const [devOpen, setDevOpen] = useState(false);
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
+
+  // ── Session params from URL (host-provided nonce + flags) ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = readSessionFromUrl(window.location.search);
+    sessionParamsRef.current = p;
+    if (p.nonce) {
+      digitsRef.current = digitsFromNonce(p.nonce, 4);
+      setDigitsForVoice(digitsRef.current);
+    }
+  }, []);
+
 
   // Post-pass capture sequence: success → lookStraight → countdown → capturing
   type CaptureSeq = "idle" | "success" | "lookStraight" | "countdown" | "capturing";
@@ -411,12 +450,15 @@ function LiveFaceAI() {
       });
       landmarkerRef.current = landmarker;
 
+      const wantAudio = sessionParamsRef.current.enableVoice === true;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
+        audio: wantAudio,
       });
       streamRef.current = stream;
+      cameraInspectionRef.current = inspectCamera(stream);
       startRecorder(stream);
+
 
       // Reset captured payload
       setImageBlob(null);
@@ -465,7 +507,9 @@ function LiveFaceAI() {
       setIntegrityDecision("ok");
       challengeRunningMsRef.current = 0;
       sessionStartRef.current = performance.now();
+      challengeTimelineRef.current = [];
       setStep("framing");
+
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       const L = langRef.current;
@@ -474,6 +518,36 @@ function LiveFaceAI() {
       else fail(msg);
     }
   }, [fail, startRecorder, videoUrl]);
+
+  // Gate: nonce staleness + per-session attempt cap + consent before any camera access.
+  const requestStart = useCallback(() => {
+    const L = langRef.current;
+    if (isNonceStale(sessionParamsRef.current)) { fail(t("sessionExpired", L)); return; }
+    if (sessionAttemptsRef.current >= CONFIG.MAX_SESSION_ATTEMPTS) {
+      setErrorMsg(t("tooManyAttempts", L));
+      setStep("blocked");
+      return;
+    }
+    if (!consentRef.current.given) { setStep("consent"); return; }
+    sessionAttemptsRef.current += 1;
+    void start();
+  }, [fail, start]);
+
+  const acceptConsent = useCallback(() => {
+    consentRef.current = {
+      given: true,
+      timestamp: Date.now(),
+      textVersion: CONFIG.CONSENT_TEXT_VERSION,
+    };
+    sessionAttemptsRef.current += 1;
+    void start();
+  }, [start]);
+
+  const declineConsent = useCallback(() => {
+    setStep("start");
+  }, []);
+
+
 
   useEffect(() => {
     if (step !== "framing" && step !== "calibrating" && step !== "liveness") return;
@@ -486,13 +560,19 @@ function LiveFaceAI() {
   }, [step]);
 
   const beginChallenges = useCallback(() => {
-    const chosen = pickChallenges();
+    const sp = sessionParamsRef.current;
+    const chosen = sp.challengesFromHost && sp.challengesFromHost.length
+      ? sp.challengesFromHost
+      : (sp.nonce ? pickChallengesFromNonce(sp.nonce) : pickChallenges());
     const now = performance.now();
     const initial = chosen.map((k) => newChallengeState(k, now));
+
     challengesRef.current = initial;
     attemptsRef.current = initial.map(() => 0);
+    challengeTimelineRef.current = initial.map((c, i) => ({ idx: i, kind: c.kind, startedAt: Date.now(), completedAt: null }));
     setChallengeView(initial);
     setActiveIdx(0);
+
     challengeStartRef.current = now;
     challengePromptedAtRef.current = now;
     breatherUntilRef.current = 0;
@@ -900,7 +980,10 @@ function LiveFaceAI() {
                   fail(t("flatSurface", langRef.current));
                   return;
                 }
+                const tl = challengeTimelineRef.current[idx];
+                if (tl && tl.completedAt == null) tl.completedAt = Date.now();
                 setChallengeView([...challengesRef.current]);
+
                 const nextIdx = Math.min(idx + 1, challengesRef.current.length - 1);
                 breatherUntilRef.current = ts + CONFIG.CHALLENGE_BREATHER_MS;
                 window.setTimeout(() => {
@@ -1017,43 +1100,98 @@ function LiveFaceAI() {
     setErrorMsg("");
   }, [photoUrl, stopAll, videoUrl]);
 
-  const buildMeta = useCallback(() => {
-    const session = sessionMetaRef.current;
-    return {
-      sessionId: session?.sessionId ?? null,
-      timestamp: new Date().toISOString(),
-      startedAt: session?.startedAt ?? null,
-      challengesIssued: challengesRef.current.map((c, i) => ({ order: i, kind: c.kind })),
-      perChallengeResult: challengesRef.current.map((c) => ({
-        kind: c.kind,
-        done: c.done,
-        blinkCount: c.blinkCount ?? 0,
-        smileIntensity: c.smileIntensity ?? 0,
-        poseProgress: c.poseProgress ?? 0,
-        parallaxOk: c.parallaxOk ?? null,
-      })),
-      blinkCount: challengesRef.current
-        .filter((c) => c.kind === "blink")
-        .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
-      livenessScore: challengesRef.current.length
-        ? challengesRef.current.filter((c) => c.done).length / challengesRef.current.length
-        : 0,
-      language: langRef.current,
-      easyModeUsed: easyMode,
-      videoSupported,
-      videoMime: recorderMimeRef.current ?? null,
-      spoofFlags: [] as string[],
-    };
-  }, [easyMode, videoSupported]);
+  const buildMeta = useCallback(
+    (extras?: { imageHash?: string | null; videoHash?: string | null }) => {
+      const session = sessionMetaRef.current;
+      const sp = sessionParamsRef.current;
+      const cam = cameraInspectionRef.current;
+      const consent = consentRef.current;
+      return {
+        // ── identity / session binding ──
+        sessionId: session?.sessionId ?? null,
+        sessionNonce: sp.nonce,
+        nonceIssuedAt: sp.nonceIssuedAt,
+        nonceExpiresAt: sp.expiresAt,
+        timestamp: new Date().toISOString(),
+        startedAt: session?.startedAt ?? null,
+
+        // ── consent ──
+        consent: {
+          given: consent.given,
+          timestamp: consent.timestamp,
+          textVersion: consent.textVersion,
+        },
+
+        // ── challenges (issued order + timestamps) ──
+        challengeOrder: challengesRef.current.map((c) => c.kind),
+        challengesIssued: challengesRef.current.map((c, i) => ({ order: i, kind: c.kind })),
+        perChallengeTimestamps: challengeTimelineRef.current,
+        perChallengeResult: challengesRef.current.map((c) => ({
+          kind: c.kind,
+          done: c.done,
+          blinkCount: c.blinkCount ?? 0,
+          smileIntensity: c.smileIntensity ?? 0,
+          poseProgress: c.poseProgress ?? 0,
+          parallaxOk: c.parallaxOk ?? null,
+        })),
+        blinkCount: challengesRef.current
+          .filter((c) => c.kind === "blink")
+          .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
+        livenessScore: challengesRef.current.length
+          ? challengesRef.current.filter((c) => c.done).length / challengesRef.current.length
+          : 0,
+
+        // ── voice (advisory; server runs ASR) ──
+        voice: sp.enableVoice
+          ? { enabled: true, expectedDigits: digitsRef.current, asrRequired: true }
+          : { enabled: false },
+
+        // ── tamper-evidence ──
+        imageHash: extras?.imageHash ?? null,
+        videoHash: extras?.videoHash ?? null,
+
+        // ── device / camera (heuristic; advisory) ──
+        device: collectDeviceInfo(),
+        camera: cam
+          ? {
+              label: cam.label,
+              virtualCameraSuspected: cam.virtualCameraSuspected,
+              settings: cam.settings,
+              capabilities: cam.capabilities,
+            }
+          : null,
+
+        // ── fraud / attempts ──
+        attemptCount: sessionAttemptsRef.current,
+
+        // ── UI / capture state ──
+        language: langRef.current,
+        easyModeUsed: easyMode,
+        videoSupported,
+        videoMime: recorderMimeRef.current ?? null,
+        integrityDecision,
+        spoofFlags: [] as string[],
+
+        // ── advisory disclaimer for server consumers ──
+        clientNotice:
+          "All client-side liveness/quality signals are advisory. The server must independently re-verify the media and nonce.",
+      };
+    },
+    [easyMode, videoSupported, integrityDecision],
+  );
 
   const submit = useCallback(async () => {
     if (!imageBlob) return;
     setSubmitState("uploading");
     setSubmitError("");
+    const [imageHash, videoHash] = await Promise.all([
+      sha256Blob(imageBlob),
+      videoBlob ? sha256Blob(videoBlob) : Promise.resolve(null),
+    ]);
     const fd = new FormData();
     fd.append("image", imageBlob, "selfie.jpg");
     if (videoBlob) fd.append("video", videoBlob, "liveness.webm");
-    fd.append("meta", JSON.stringify(buildMeta()));
+    fd.append("meta", JSON.stringify(buildMeta({ imageHash, videoHash })));
 
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => ctrl.abort(), CONFIG.SUBMIT_TIMEOUT_MS);
@@ -1077,6 +1215,7 @@ function LiveFaceAI() {
 
 
 
+
   return (
     <main
       className="min-h-dvh bg-zinc-950 text-zinc-100"
@@ -1097,9 +1236,34 @@ function LiveFaceAI() {
           <LangToggle lang={lang} onChange={setLang} />
         </header>
 
-        {step === "start" && <StartScreen onStart={start} tx={tx} />}
+        {step === "start" && (
+          <StartScreen
+            onStart={requestStart}
+            tx={tx}
+            voiceEnabled={sessionParamsRef.current.enableVoice}
+            nonceBound={!!sessionParamsRef.current.nonce}
+          />
+        )}
+        {step === "consent" && (
+          <ConsentScreen
+            tx={tx}
+            voiceEnabled={sessionParamsRef.current.enableVoice}
+            onAccept={acceptConsent}
+            onDecline={declineConsent}
+          />
+        )}
+        {step === "blocked" && (
+          <ErrorScreen msg={errorMsg || tx("tooManyAttempts")} onRetry={reset} onHome={reset} tx={tx} />
+        )}
         {step === "loading" && <LoadingScreen tx={tx} />}
+
+        {sessionParamsRef.current.enableVoice && digitsForVoice && (step === "framing" || step === "calibrating" || step === "liveness") && (
+          <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-center text-sm text-amber-200">
+            🎤 {tx("sayDigits", { digits: digitsForVoice })}
+          </div>
+        )}
         {(step === "framing" || step === "calibrating" || step === "liveness") && (
+
           <LivenessScreen
             phase={step}
             videoRef={videoRef}
@@ -1199,12 +1363,27 @@ function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => voi
   );
 }
 
-function StartScreen({ onStart, tx }: { onStart: () => void; tx: Tx }) {
+function StartScreen({
+  onStart,
+  tx,
+  voiceEnabled = false,
+  nonceBound = false,
+}: {
+  onStart: () => void;
+  tx: Tx;
+  voiceEnabled?: boolean;
+  nonceBound?: boolean;
+}) {
   return (
     <section className="space-y-6 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">{tx("startTitle")}</h2>
         <p className="mt-2 text-sm text-zinc-400">{tx("startSubtitle")}</p>
+        {(voiceEnabled || nonceBound) && (
+          <p className="mt-2 text-[11px] text-zinc-500">
+            {nonceBound ? "✓ session-bound" : ""}{nonceBound && voiceEnabled ? " · " : ""}{voiceEnabled ? "🎤 voice on" : ""}
+          </p>
+        )}
       </div>
       <ol className="space-y-3 text-sm">
         {(["step1", "step2", "step3", "step4"] as const).map((k, i) => (
@@ -1227,6 +1406,54 @@ function StartScreen({ onStart, tx }: { onStart: () => void; tx: Tx }) {
     </section>
   );
 }
+
+function ConsentScreen({
+  tx,
+  voiceEnabled,
+  onAccept,
+  onDecline,
+}: {
+  tx: Tx;
+  voiceEnabled: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const [checked, setChecked] = useState(false);
+  return (
+    <section className="space-y-5 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">{tx("consentTitle")}</h2>
+        <p className="mt-2 text-sm text-zinc-300">{tx("consentBody")}</p>
+        {voiceEnabled && (
+          <p className="mt-2 text-sm text-amber-300">{tx("consentBodyVoice")}</p>
+        )}
+      </div>
+      <label className="flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-sm text-zinc-200">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => setChecked(e.target.checked)}
+          className="mt-1 h-4 w-4 accent-emerald-500"
+        />
+        <span>{tx("consentCheckbox")}</span>
+      </label>
+      <div className="flex gap-2">
+        <Button
+          size="lg"
+          onClick={onAccept}
+          disabled={!checked}
+          className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
+        >
+          {tx("consentContinue")}
+        </Button>
+        <Button size="lg" variant="ghost" onClick={onDecline} className="text-zinc-300">
+          {tx("consentDecline")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 
 function LoadingScreen({ tx }: { tx: Tx }) {
   return (

@@ -39,7 +39,13 @@ export const CONFIG = {
   GUIDANCE_DEBOUNCE_MS: 300,
   READOUT_THROTTLE_MS: 200,
   FPS_REPORT_MS: 1000,
+
+  // ── Anti-fraud / session integrity ──
+  CONSENT_TEXT_VERSION: "v1",
+  MAX_SESSION_ATTEMPTS: 3,
+  NONCE_DEFAULT_TTL_MS: 2 * 60_000,
 } as const;
+
 
 export const API_ENDPOINT: string =
   (import.meta as unknown as { env?: Record<string, string> }).env

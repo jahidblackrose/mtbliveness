@@ -166,7 +166,45 @@ export const STRINGS = {
   },
   cancel: { bn: "বাতিল", en: "Cancel" },
   langLabel: { bn: "বাংলা", en: "English" },
+
+  // Consent (KYC biometric capture)
+  consentTitle: { bn: "সম্মতি প্রয়োজন", en: "Consent required" },
+  consentBody: {
+    bn: "যাচাইয়ের জন্য আপনার ছবি ও ১০ সেকেন্ডের ভিডিও তোলা হবে এবং নির্ধারিত সার্ভারে পাঠানো হবে। সম্মতি ছাড়া ক্যামেরা চালু হবে না।",
+    en: "Your photo and a 10-second video will be captured for verification and sent to the configured server. The camera will not start without your consent.",
+  },
+  consentBodyVoice: {
+    bn: "ভয়েস চ্যালেঞ্জ চালু — আপনার মাইক্রোফোনও ব্যবহার করা হবে।",
+    en: "Voice challenge is enabled — your microphone will also be used.",
+  },
+  consentCheckbox: {
+    bn: "আমি আমার ছবি, ভিডিও ও মেটাডেটা যাচাইয়ের জন্য পাঠাতে সম্মত",
+    en: "I consent to sending my photo, video, and metadata for verification",
+  },
+  consentContinue: { bn: "সম্মতি দিয়ে এগিয়ে যান", en: "Consent and continue" },
+  consentDecline: { bn: "বাতিল", en: "Decline" },
+
+  // Anti-fraud
+  tooManyAttempts: {
+    bn: "অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।",
+    en: "Too many attempts. Please try again later.",
+  },
+  sessionExpired: {
+    bn: "সেশন মেয়াদোত্তীর্ণ। নতুন সেশন শুরু করুন।",
+    en: "Session expired. Please start a new session.",
+  },
+  virtualCameraWarn: {
+    bn: "ভার্চুয়াল ক্যামেরা শনাক্ত হতে পারে — আসল ক্যামেরা ব্যবহার করুন।",
+    en: "Possible virtual camera detected — please use a real camera.",
+  },
+
+  // Voice / lip-sync (advisory; ASR happens server-side)
+  sayDigits: {
+    bn: "এই সংখ্যাগুলো জোরে পড়ুন: {digits}",
+    en: "Read these numbers aloud: {digits}",
+  },
 } as const satisfies Record<string, Pair>;
+
 
 
 export type StringKey = keyof typeof STRINGS;
