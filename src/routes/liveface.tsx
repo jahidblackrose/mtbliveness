@@ -1745,6 +1745,14 @@ function LivenessScreen({
   const inSoft = softTimeoutIdx != null;
   const inCapture = phase === "liveness" && captureSeq !== "idle";
 
+  // randomSequence: render the CURRENT sub-step as if it were its own challenge
+  // (full friendly prompt + demo + meter), with a small "{n}/2" progress chip.
+  const isSeq = !!active && active.kind === "randomSequence";
+  const seqStep = isSeq ? (active!.seqStep ?? 0) : 0;
+  const seqActions = isSeq ? active!.seqActions : undefined;
+  const displayActive = isSeq ? (active!.seqSubState ?? active!) : active;
+  const displayKind = displayActive?.kind ?? active?.kind;
+
   let headerLabel = "";
   if (phase === "framing") headerLabel = tx("framing");
   else if (phase === "calibrating") headerLabel = tx("calibrating");
