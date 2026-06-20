@@ -1905,6 +1905,11 @@ function LivenessScreen({
                 <p className="mt-1 text-[10px] text-white/40">
                   dominant {liveReadout.dominantAxis} · gesture {liveReadout.resolved} · pass {liveReadout.pass ? "YES" : "NO"} · Y±{DIRECTION.YAW_LEFT_SIGN} · mirrored {DIRECTION.MIRRORED ? "yes" : "no"} · idx {integrity.currentIdx} · passed {integrity.passed}/{challenges.length} · refSig {integrity.refCaptured ? "✓" : "—"} · sim {integrity.liveSim.toFixed(2)} · {integrity.decision}
                 </p>
+                {padReadout && (
+                  <p className="mt-1 text-[10px] text-white/40">
+                    PAD moiré {padReadout.moire.toFixed(2)} · flicker {padReadout.flicker.toFixed(2)} · planar {padReadout.planar.toFixed(2)} · shoulders {padReadout.shouldersVisible === null ? "—" : padReadout.shouldersVisible ? "✓" : "✗"} ({padReadout.shoulderSpanRatio.toFixed(2)}×face) · active {active?.kind ?? "—"}
+                  </p>
+                )}
               </>
             )}
           </div>
