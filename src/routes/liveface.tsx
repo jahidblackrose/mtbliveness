@@ -403,12 +403,10 @@ function LiveFaceAI() {
         // Stop & assemble the rolling video — keep camera stream alive
         // so retake can re-run the post-pass countdown without redoing challenges.
         const vb = await assembleVideo();
-        if (vb) {
-          setVideoBlob(vb);
-          setVideoUrl(URL.createObjectURL(vb));
-        } else {
-          setVideoBlob(null);
-        }
+        // Silent video: keep Blob in memory for upload; never create a
+        // visible object URL or render <video> for it (Change 2).
+        setVideoBlob(vb ?? null);
+        setVideoUrl(null);
         setStep("result");
       },
       "image/jpeg",
