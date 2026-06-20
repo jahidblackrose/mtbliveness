@@ -93,14 +93,21 @@ function mulberry32(seed: number) {
 
 export function pickChallengesFromNonce(nonce: string, includeVoice = false): ChallengeKind[] {
   const rng = mulberry32(strHash(nonce));
-  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "nod"];
+  // Head movement: one of 4 (turnLeft/turnRight/lookUp/lookDown). Parallax + signed-axis check.
+  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "lookUp", "lookDown"];
   const head = heads[Math.floor(rng() * heads.length)];
-  const picked: ChallengeKind[] = [head, "blink", "smile"];
+  // Two easy actions from a pool of 3: blink, smile, mouthOpen.
+  const easyPool: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  for (let i = easyPool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [easyPool[i], easyPool[j]] = [easyPool[j], easyPool[i]];
+  }
+  const picked: ChallengeKind[] = [head, easyPool[0], easyPool[1]];
   for (let i = picked.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [picked[i], picked[j]] = [picked[j], picked[i]];
   }
-  void includeVoice; // voice prompt is shown out-of-band as an overlay, not a challenge slot
+  void includeVoice;
   return picked;
 }
 
