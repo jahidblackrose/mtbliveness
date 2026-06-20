@@ -569,8 +569,10 @@ function LiveFaceAI() {
 
     challengesRef.current = initial;
     attemptsRef.current = initial.map(() => 0);
+    challengeTimelineRef.current = initial.map((c, i) => ({ idx: i, kind: c.kind, startedAt: Date.now(), completedAt: null }));
     setChallengeView(initial);
     setActiveIdx(0);
+
     challengeStartRef.current = now;
     challengePromptedAtRef.current = now;
     breatherUntilRef.current = 0;
