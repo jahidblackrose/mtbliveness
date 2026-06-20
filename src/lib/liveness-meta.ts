@@ -155,7 +155,7 @@ export type SessionParams = {
   challengesFromHost: ChallengeKind[] | null;
   enableVoice: boolean;
 };
-const KIND_WHITELIST = new Set<ChallengeKind>(["blink", "smile", "turnLeft", "turnRight", "nod", "lookUp", "lookDown", "mouthOpen", "followDot", "randomSequence", "readDigits"]);
+const KIND_WHITELIST = new Set<ChallengeKind>(["blink", "smile", "turnLeft", "turnRight", "nod", "lookUp", "lookDown", "mouthOpen", "randomSequence", "readDigits"]);
 export function readSessionFromUrl(search: string): SessionParams {
   const p = new URLSearchParams(search);
   const nonce = p.get("nonce");
