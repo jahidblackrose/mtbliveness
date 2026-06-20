@@ -74,7 +74,7 @@ export const CONFIG = {
   // ── 4-challenge selection (Change 1) ──
   CHALLENGE_COUNT: 4,
   COMMON_POOL: ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"] as const,
-  SURPRISE_POOL: ["followDot", "randomSequence", "readDigits"] as const,
+  SURPRISE_POOL: ["randomSequence", "readDigits"] as const,
   HEAD_KINDS: ["turnLeft", "turnRight", "lookUp", "lookDown"] as const,
   FOLLOW_DOT_HOLD_MS: 700,
   FOLLOW_DOT_AXIS_MIN: 0.12,
