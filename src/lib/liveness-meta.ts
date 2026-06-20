@@ -137,12 +137,18 @@ export function digitsFromNonce(nonce: string, n = 4): string {
 // Same nonce → same pair AND same order, so the server can re-derive + verify.
 export function seqActionsFromNonce(nonce: string): [ChallengeKind, ChallengeKind] {
   const rng = mulberry32(strHash(`${nonce}:seq`));
-  const pool: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+  const easy: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  const head: ChallengeKind[] = ["turnLeft", "turnRight"];
+  const pickFrom = <T,>(arr: T[]) => arr[Math.floor(rng() * arr.length)];
+  const first = pickFrom(easy);
+  const useHead = rng() < 0.3;
+  let second: ChallengeKind;
+  if (useHead) second = pickFrom(head);
+  else {
+    const rem = easy.filter((k) => k !== first);
+    second = pickFrom(rem.length ? rem : easy);
   }
-  return [pool[0], pool[1]];
+  return [first, second];
 }
 
 // ── Session parsing (URL-based, host-app provided) ──────────────────────
