@@ -150,3 +150,50 @@ function NodDemo({ size }: { size: number }) {
     </svg>
   );
 }
+
+function LookDemo({ size, direction }: { size: number; direction: "up" | "down" }) {
+  const s = size * 0.7;
+  const sign = direction === "up" ? -1 : 1;
+  return (
+    <svg viewBox="0 0 40 40" width={s} height={s} aria-hidden="true">
+      <style>{`
+        @keyframes lf-look-${direction} {
+          0%,100% { transform: translateY(0) rotateX(0deg); }
+          50% { transform: translateY(${sign * 2}px) rotateX(${sign * 25}deg); }
+        }
+        .lf-head-look-${direction} {
+          transform-origin: 20px 20px;
+          animation: lf-look-${direction} 1.6s ease-in-out infinite;
+        }
+      `}</style>
+      <g className={`lf-head-look-${direction}`} stroke="currentColor" strokeWidth="2" fill="none">
+        <ellipse cx="20" cy="20" rx="10" ry="13" />
+        <circle cx="16" cy="18" r="1.2" fill="currentColor" />
+        <circle cx="24" cy="18" r="1.2" fill="currentColor" />
+        <path d="M16 26 Q20 28 24 26" strokeLinecap="round" />
+      </g>
+      <path
+        d={direction === "up" ? "M20 3 L17 7 L23 7 Z" : "M20 37 L17 33 L23 33 Z"}
+        fill="currentColor"
+        opacity="0.8"
+      />
+    </svg>
+  );
+}
+
+function MouthOpenDemo({ size }: { size: number }) {
+  const s = size * 0.7;
+  return (
+    <svg viewBox="0 0 40 40" width={s} height={s} aria-hidden="true">
+      <style>{`
+        @keyframes lf-mouth-open { 0%,100% { ry: 1.5; } 50% { ry: 5.5; } }
+        .lf-mouth-o { animation: lf-mouth-open 1.4s ease-in-out infinite; transform-origin: 20px 25px; }
+      `}</style>
+      <circle cx="20" cy="20" r="16" stroke="currentColor" strokeWidth="2" fill="none" />
+      <circle cx="14" cy="17" r="1.6" fill="currentColor" />
+      <circle cx="26" cy="17" r="1.6" fill="currentColor" />
+      <ellipse className="lf-mouth-o" cx="20" cy="25" rx="5" ry="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
