@@ -261,10 +261,15 @@ function LiveFaceAI() {
   });
   const readoutAccumRef = useRef(0);
 
-  // ── Post-pass integrity gate: reference signature + live similarity ──
+  // ── Integrity gate: early-locked reference + continuous similarity ──
   const refSigSamplesRef = useRef<FaceSignature[]>([]);
   const referenceSigRef = useRef<FaceSignature | null>(null);
   const lastSignatureRef = useRef<FaceSignature | null>(null);
+  const identityLockedAtMsRef = useRef<number | null>(null);
+  const simMinRef = useRef<number>(1);
+  const lastFrontalSimRef = useRef<number>(1);
+  const maxSigJumpRef = useRef<number>(0);
+  const continuityBreaksRef = useRef<number>(0);
   const [refSigCaptured, setRefSigCaptured] = useState(false);
   const [liveSim, setLiveSim] = useState(1);
   const integrityFailStartRef = useRef<number | null>(null);
