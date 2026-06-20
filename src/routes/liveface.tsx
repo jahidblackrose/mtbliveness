@@ -1624,6 +1624,8 @@ function LivenessScreen({
   devOpen,
   onToggleDev,
   onCancel,
+  onDotSide,
+  padReadout,
   tx,
 }: {
   phase: "framing" | "calibrating" | "liveness";
