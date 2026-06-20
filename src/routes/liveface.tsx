@@ -1017,32 +1017,10 @@ function LiveFaceAI() {
           // success (brief celebration) → lookStraight (hold) → 3-2-1 → capture
           const seq = captureSeqRef.current;
 
-          // Finalize the reference signature once at the boundary.
-          if (referenceSigRef.current == null && refSigSamplesRef.current.length > 0) {
-            referenceSigRef.current = avgSignatures(refSigSamplesRef.current);
-            setRefSigCaptured(!!referenceSigRef.current);
-          }
+          // (identity reference is now locked & compared continuously in the
+          // signature block above — no post-pass-only logic needed here.)
 
-          // Part B: continuously compare current face to reference signature.
-          // Only meaningful when reference exists and a face is present.
-          const ref = referenceSigRef.current;
-          const cur = lastSignatureRef.current;
-          if (ref && cur) {
-            const sim = signatureSimilarity(ref, cur);
-            setLiveSim(sim);
-            if (sim < INTEGRITY.SIM_PASS) {
-              if (integrityFailStartRef.current == null) integrityFailStartRef.current = ts;
-              if (ts - integrityFailStartRef.current >= INTEGRITY.FAIL_SUSTAIN_MS) {
-                integrityRestart("changed");
-                return;
-              }
-            } else {
-              integrityFailStartRef.current = null;
-            }
-          } else if (!cur) {
-            // No face present: don't accumulate mismatch time (Part A: pause).
-            integrityFailStartRef.current = null;
-          }
+
 
           if (seq === "idle") {
             captureSeqRef.current = "success";
