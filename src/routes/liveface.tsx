@@ -434,6 +434,15 @@ function LiveFaceAI() {
     setErrorMsg("");
     setStep("loading");
     try {
+      // IMPORTANT: kick off getUserMedia FIRST, synchronously inside the user gesture.
+      // Awaiting model downloads before requesting the camera loses the gesture context
+      // on Safari/iOS and after re-entry post-publish, causing the camera to never appear.
+      const wantAudio = sessionParamsRef.current.enableVoice === true;
+      const streamPromise = navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: wantAudio,
+      });
+
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm",
       );
@@ -450,11 +459,7 @@ function LiveFaceAI() {
       });
       landmarkerRef.current = landmarker;
 
-      const wantAudio = sessionParamsRef.current.enableVoice === true;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: wantAudio,
-      });
+      const stream = await streamPromise;
       streamRef.current = stream;
       cameraInspectionRef.current = inspectCamera(stream);
       startRecorder(stream);
