@@ -865,7 +865,16 @@ function LiveFaceAI() {
       }
 
       if (currentStep === "framing") {
-        if (g.ok && m) {
+        // SLICE 2: block framing pass if shoulders required but not visible.
+        const pInfo = poseRef.current.info;
+        const shoulderBlock =
+          poseRef.current.enabled &&
+          pInfo != null &&
+          !pInfo.shouldersVisible;
+        if (shoulderBlock) {
+          setSmoothGuidance(t("shouldersHint", langRef.current), ts);
+          framingHoldStartRef.current = null;
+        } else if (g.ok && m) {
           if (framingHoldStartRef.current == null) framingHoldStartRef.current = ts;
           if (ts - framingHoldStartRef.current >= CONFIG.FRAMING_HOLD_MS) {
             calibAccRef.current = emptyAccumulator();
