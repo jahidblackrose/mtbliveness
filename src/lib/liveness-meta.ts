@@ -100,30 +100,26 @@ export function pickChallengesFromNonce(nonce: string, includeVoice = false): Ch
     }
     return arr;
   };
+  const pick = <T,>(arr: T[]) => arr[Math.floor(rng() * arr.length)];
 
-  // COMMON pool (Change 1) — pick 3, must include at least one head movement.
-  const common: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
-  const heads = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown"]);
-  let commonPicked: ChallengeKind[] = [];
-  // reshuffle until first 3 contain ≥1 head
-  for (let tries = 0; tries < 8; tries++) {
-    shuffle(common);
-    commonPicked = common.slice(0, 3);
-    if (commonPicked.some((k) => heads.has(k))) break;
-  }
+  // 2 easy from {blink, smile, mouthOpen}
+  const easy: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  shuffle(easy);
+  const easyPicked = easy.slice(0, 2);
 
-  // SURPRISE pool — pick 1. readDigits only if voice enabled.
+  // 1 single easy head turn
+  const head = pick<ChallengeKind>(["turnLeft", "turnRight"]);
+
+  // 1 surprise — randomSequence (+ readDigits if voice on). followDot removed.
+  // If voice off and surprise pool ends up empty for some reason, fall back to easy.
   const surprisePool: ChallengeKind[] = includeVoice
-    ? ["followDot", "randomSequence", "readDigits"]
-    : ["followDot", "randomSequence"];
-  shuffle(surprisePool);
-  const surprise = surprisePool[0];
+    ? ["randomSequence", "readDigits"]
+    : ["randomSequence"];
+  const surprise = surprisePool.length ? pick(surprisePool) : pick(easy);
 
-  // Insert surprise at a random position 0..3 → final 4 challenges.
-  const insertAt = Math.floor(rng() * 4);
-  const picked = [...commonPicked];
-  picked.splice(insertAt, 0, surprise);
-  return picked.slice(0, 4);
+  const base: ChallengeKind[] = [easyPicked[0], easyPicked[1], head, surprise];
+  shuffle(base);
+  return base.slice(0, 4);
 }
 
 export function digitsFromNonce(nonce: string, n = 4): string {
@@ -159,7 +155,7 @@ export type SessionParams = {
   challengesFromHost: ChallengeKind[] | null;
   enableVoice: boolean;
 };
-const KIND_WHITELIST = new Set<ChallengeKind>(["blink", "smile", "turnLeft", "turnRight", "nod", "lookUp", "lookDown", "mouthOpen", "followDot", "randomSequence", "readDigits"]);
+const KIND_WHITELIST = new Set<ChallengeKind>(["blink", "smile", "turnLeft", "turnRight", "nod", "lookUp", "lookDown", "mouthOpen", "randomSequence", "readDigits"]);
 export function readSessionFromUrl(search: string): SessionParams {
   const p = new URLSearchParams(search);
   const nonce = p.get("nonce");

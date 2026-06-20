@@ -1484,10 +1484,6 @@ function LiveFaceAI() {
             devOpen={devOpen}
             onToggleDev={() => setDevOpen((v) => !v)}
             onCancel={reset}
-            onDotSide={(side) => {
-              const c = challengesRef.current[activeIdx];
-              if (c && c.kind === "followDot") c.dotSide = side;
-            }}
             padReadout={{
               moire: padRef.current.moire,
               flicker: padRef.current.flicker,
@@ -1690,7 +1686,7 @@ function LivenessScreen({
   devOpen,
   onToggleDev,
   onCancel,
-  onDotSide,
+  
   padReadout,
   tx,
   lang,
@@ -1737,7 +1733,7 @@ function LivenessScreen({
   devOpen: boolean;
   onToggleDev: () => void;
   onCancel: () => void;
-  onDotSide?: (side: { x: -1 | 0 | 1; y: -1 | 0 | 1 }) => void;
+  
   padReadout?: {
     moire: number;
     flicker: number;
@@ -2038,10 +2034,6 @@ function LivenessScreen({
               />
             )}
 
-            {/* SLICE 3: FollowDot overlay */}
-            {phase === "liveness" && !inCapture && active?.kind === "followDot" && (
-              <FollowDotOverlay onSide={onDotSide} />
-            )}
 
             <div
               className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
@@ -2312,46 +2304,4 @@ function drawOverlay(
   ctx.stroke();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SLICE 3: FollowDot overlay — animates a dot to 4 positions and reports the
-// dot's side (relative to centre) so the followDot evaluator can verify the
-// user's head/gaze tracks it. Mirror-correct: the camera is CSS-mirrored, so
-// the screen-x sign already matches the user's perceived left/right.
-// ─────────────────────────────────────────────────────────────────────────────
-function FollowDotOverlay({
-  onSide,
-}: {
-  onSide?: (side: { x: -1 | 0 | 1; y: -1 | 0 | 1 }) => void;
-}) {
-  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0.15, y: 0.5 });
-  useEffect(() => {
-    const positions: { x: number; y: number; side: { x: -1 | 0 | 1; y: -1 | 0 | 1 } }[] = [
-      { x: 0.12, y: 0.5, side: { x: -1, y: 0 } },
-      { x: 0.88, y: 0.5, side: { x: 1, y: 0 } },
-      { x: 0.5, y: 0.15, side: { x: 0, y: -1 } },
-      { x: 0.5, y: 0.85, side: { x: 0, y: 1 } },
-    ];
-    let i = 0;
-    const tick = () => {
-      const p = positions[i % positions.length];
-      setPos({ x: p.x, y: p.y });
-      onSide?.(p.side);
-      i++;
-    };
-    tick();
-    const id = window.setInterval(tick, 1400);
-    return () => {
-      window.clearInterval(id);
-      onSide?.({ x: 0, y: 0 });
-    };
-  }, [onSide]);
-  return (
-    <div className="pointer-events-none absolute inset-0">
-      <div
-        className="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300 shadow-[0_0_20px_4px_rgba(110,231,183,0.7)] transition-all duration-500"
-        style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
-      />
-    </div>
-  );
-}
 

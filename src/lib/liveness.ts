@@ -210,11 +210,11 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 // ─────────────────────────────────────────────────────────────────────────────
 // Challenges
 // ─────────────────────────────────────────────────────────────────────────────
-export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "followDot" | "randomSequence" | "readDigits";
+export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "randomSequence" | "readDigits";
 
 
-// Config flag: include lookUp/lookDown/followDot in default pool (off by default — harder/finickier).
-export const CHALLENGE_FLAGS = { enablePitchHead: false, enableFollowDot: false };
+// Config flag: include lookUp/lookDown in default pool (off by default — harder/finickier).
+export const CHALLENGE_FLAGS = { enablePitchHead: false };
 
 export function pickChallenges(): ChallengeKind[] {
   const shuffle = <T,>(arr: T[]) => {
@@ -236,10 +236,8 @@ export function pickChallenges(): ChallengeKind[] {
   shuffle(headPool);
   const head = headPool[0];
 
-  // Surprise: prefer randomSequence; followDot only behind a flag.
-  const surprisePool: ChallengeKind[] = CHALLENGE_FLAGS.enableFollowDot
-    ? ["randomSequence", "followDot"]
-    : ["randomSequence"];
+  // Surprise: randomSequence (followDot removed entirely).
+  const surprisePool: ChallengeKind[] = ["randomSequence"];
   shuffle(surprisePool);
   const surprise = surprisePool[0];
 
@@ -279,8 +277,7 @@ export type ChallengeState = {
   nodPhase?: "neutral" | "down" | "up";
   nodPitchEma?: number;
   nodBasePitch?: number;
-  // followDot / randomSequence (Phase B)
-  dotSide?: { x: -1 | 0 | 1; y: -1 | 0 | 1 };
+  // randomSequence (Phase B)
   seqStep?: 0 | 1;
   seqActions?: [ChallengeKind, ChallengeKind]; // pair of single-action kinds, in order
   seqSubState?: ChallengeState;                 // per-frame state of the current sub-action
@@ -812,19 +809,7 @@ export function updateChallenge(
         done: heldMs >= 250, // MOUTH_OPEN_HOLD_MS
       };
     }
-    case "followDot": {
-      // Pass when yaw/pitch trend matches dot's side (stored on state.dotSide).
-      // dotSide encoded as {x:-1|0|1, y:-1|0|1}; host overlay sets it each tick.
-      const side = state.dotSide ?? { x: 0, y: 0 };
-      const dy = m.yaw - baseline.yaw; // +ve = user's right
-      const dp = m.pitch - baseline.pitch; // sign depends on PITCH.UP_SIGN
-      const axisMin = 0.12; // CONFIG.FOLLOW_DOT_AXIS_MIN
-      const yawMatch = side.x !== 0 && Math.sign(dy) === side.x && Math.abs(dy) > axisMin * mul;
-      const pitchMatch = side.y !== 0 && Math.sign(dp) === side.y * PITCH.UP_SIGN * -1 && Math.abs(dp) > axisMin * mul;
-      const matching = yawMatch || pitchMatch;
-      const holdStart = matching ? state.smileHoldStart ?? now : 0;
-      return { ...state, smileHoldStart: holdStart, done: matching && now - (holdStart || now) >= 700 };
-    }
+    // followDot removed.
     case "randomSequence": {
       // Composite: two nonce-seeded actions in order. Delegate per-frame
       // evaluation to the active sub-action's own detector so each sub-step
