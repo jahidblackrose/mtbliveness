@@ -1668,6 +1668,14 @@ function LivenessScreen({
   devOpen: boolean;
   onToggleDev: () => void;
   onCancel: () => void;
+  onDotSide?: (side: { x: -1 | 0 | 1; y: -1 | 0 | 1 }) => void;
+  padReadout?: {
+    moire: number;
+    flicker: number;
+    planar: number;
+    shoulderSpanRatio: number;
+    shouldersVisible: boolean | null;
+  };
   tx: Tx;
 }) {
   const active = challenges[activeIdx];
