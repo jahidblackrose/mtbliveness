@@ -43,6 +43,14 @@ import {
   t,
 } from "@/lib/liveness-i18n";
 import { ChallengeDemo } from "@/components/challenge-demo";
+import { getPoseDetector, analyseShoulders, type UpperBodyInfo } from "@/lib/liveness-pose";
+import {
+  moireEnergy,
+  flickerScore,
+  replayRiskScore,
+  activeFlags,
+  type SpoofFlag,
+} from "@/lib/liveness-pad";
 
 export const Route = createFileRoute("/liveface")({
   ssr: false,
@@ -191,6 +199,29 @@ function LiveFaceAI() {
 
   const [fps, setFps] = useState(0);
   const fpsAccumRef = useRef<{ frames: number; lastReport: number }>({ frames: 0, lastReport: 0 });
+
+  // ── PAD / replay risk (SLICE 1) ──
+  const padRef = useRef({
+    brightnessHist: [] as number[],
+    moire: 0,
+    flicker: 0,
+    planar: 0, // proxy via SpoofGuard flat-surface flag for now
+    frame: 0,
+  });
+  // ── Pose / shoulder gate (SLICE 2) ──
+  const poseRef = useRef<{
+    frame: number;
+    cadence: number;
+    enabled: boolean;
+    info: UpperBodyInfo | null;
+    loading: boolean;
+  }>({
+    frame: 0,
+    cadence: CONFIG.POSE_SAMPLE_EVERY_N,
+    enabled: CONFIG.SHOULDER_GATE,
+    info: null,
+    loading: false,
+  });
 
   const [devOpen, setDevOpen] = useState(false);
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
@@ -736,6 +767,51 @@ function LiveFaceAI() {
         );
         sctx.drawImage(video, 0, 0, sample.width, sample.height);
         brightness = avgBrightness(sctx, sample.width, sample.height);
+
+        // ── SLICE 1: PAD scorers (advisory, throttled) ──
+        const pad = padRef.current;
+        pad.frame++;
+        // brightness history for flicker autocorr
+        pad.brightnessHist.push(brightness);
+        if (pad.brightnessHist.length > 30) pad.brightnessHist.shift();
+        // moiré every 4th frame
+        if (pad.frame % 4 === 0) {
+          try {
+            const imgd = sctx.getImageData(0, 0, sample.width, sample.height);
+            // grayscale
+            const gray = new Uint8ClampedArray(sample.width * sample.height);
+            for (let i = 0, j = 0; i < imgd.data.length; i += 4, j++) {
+              gray[j] = (imgd.data[i] + imgd.data[i + 1] + imgd.data[i + 2]) / 3;
+            }
+            pad.moire = moireEnergy(gray, sample.width, sample.height);
+          } catch { /* ignore */ }
+          pad.flicker = flickerScore(pad.brightnessHist);
+        }
+      }
+
+      // ── SLICE 2: shoulder/upper-body check (opt-in, low cadence) ──
+      const pose = poseRef.current;
+      if (pose.enabled && m) {
+        pose.frame++;
+        // FPS guard: degrade cadence if FPS is suffering
+        if (fps > 0 && fps < 18 && pose.cadence < 8) pose.cadence = pose.cadence * 2;
+        if (pose.frame % pose.cadence === 0 && !pose.loading) {
+          pose.loading = true;
+          getPoseDetector()
+            .then((det) => {
+              try {
+                const res = det.detectForVideo(video, ts);
+                pose.info = analyseShoulders(
+                  res,
+                  Math.max(0.05, m.faceSize),
+                  CONFIG.SHOULDER_SPAN_RATIO_MIN,
+                  CONFIG.SHOULDER_MOTION_MIN_STDDEV,
+                );
+              } catch { /* ignore */ }
+            })
+            .catch(() => { /* model load failed → silently disable */ pose.enabled = false; })
+            .finally(() => { pose.loading = false; });
+        }
       }
 
       drawOverlay(overlay, m, faces);
@@ -789,7 +865,16 @@ function LiveFaceAI() {
       }
 
       if (currentStep === "framing") {
-        if (g.ok && m) {
+        // SLICE 2: block framing pass if shoulders required but not visible.
+        const pInfo = poseRef.current.info;
+        const shoulderBlock =
+          poseRef.current.enabled &&
+          pInfo != null &&
+          !pInfo.shouldersVisible;
+        if (shoulderBlock) {
+          setSmoothGuidance(t("shouldersHint", langRef.current), ts);
+          framingHoldStartRef.current = null;
+        } else if (g.ok && m) {
           if (framingHoldStartRef.current == null) framingHoldStartRef.current = ts;
           if (ts - framingHoldStartRef.current >= CONFIG.FRAMING_HOLD_MS) {
             calibAccRef.current = emptyAccumulator();
@@ -1180,7 +1265,28 @@ function LiveFaceAI() {
         videoSupported,
         videoMime: recorderMimeRef.current ?? null,
         integrityDecision,
-        spoofFlags: [] as string[],
+        ...(() => {
+          // ── SLICE 1+2: PAD risk + upper-body presence (advisory) ──
+          const pad = padRef.current;
+          const cam = cameraInspectionRef.current;
+          const upper = poseRef.current.info;
+          const flags: Partial<Record<SpoofFlag, number>> = {
+            "screen-artifact": pad.moire > CONFIG.MOIRE_ENERGY_MAX ? pad.moire : 0,
+            "screen-flicker": pad.flicker > CONFIG.FLICKER_SCORE_MAX ? pad.flicker : 0,
+            "planar-motion": pad.planar > CONFIG.PLANAR_MOTION_MAX ? pad.planar : 0,
+            "virtualCameraSuspected": cam?.virtualCameraSuspected ? 1 : 0,
+          };
+          const replayRisk = replayRiskScore(flags, CONFIG.REPLAY_RISK_WEIGHTS);
+          const active = activeFlags(flags, 0.5);
+          return {
+            spoofFlags: active,
+            replayRisk,
+            needsManualReview: replayRisk > CONFIG.REPLAY_RISK_THRESHOLD,
+            padSignals: { moire: pad.moire, flicker: pad.flicker, planar: pad.planar },
+            upperBody: upper ?? { shouldersVisible: null, shoulderSpanRatio: 0, shoulderMotionOk: null },
+            depth: { method: "monocular-proxy", compliant: false },
+          };
+        })(),
 
         // ── advisory disclaimer for server consumers ──
         clientNotice:
@@ -1313,6 +1419,17 @@ function LiveFaceAI() {
             devOpen={devOpen}
             onToggleDev={() => setDevOpen((v) => !v)}
             onCancel={reset}
+            onDotSide={(side) => {
+              const c = challengesRef.current[activeIdx];
+              if (c && c.kind === "followDot") c.dotSide = side;
+            }}
+            padReadout={{
+              moire: padRef.current.moire,
+              flicker: padRef.current.flicker,
+              planar: padRef.current.planar,
+              shoulderSpanRatio: poseRef.current.info?.shoulderSpanRatio ?? 0,
+              shouldersVisible: poseRef.current.info?.shouldersVisible ?? null,
+            }}
             tx={tx}
           />
         )}
@@ -1507,6 +1624,8 @@ function LivenessScreen({
   devOpen,
   onToggleDev,
   onCancel,
+  onDotSide,
+  padReadout,
   tx,
 }: {
   phase: "framing" | "calibrating" | "liveness";
@@ -1551,6 +1670,14 @@ function LivenessScreen({
   devOpen: boolean;
   onToggleDev: () => void;
   onCancel: () => void;
+  onDotSide?: (side: { x: -1 | 0 | 1; y: -1 | 0 | 1 }) => void;
+  padReadout?: {
+    moire: number;
+    flicker: number;
+    planar: number;
+    shoulderSpanRatio: number;
+    shouldersVisible: boolean | null;
+  };
   tx: Tx;
 }) {
   const active = challenges[activeIdx];
@@ -1778,6 +1905,11 @@ function LivenessScreen({
                 <p className="mt-1 text-[10px] text-white/40">
                   dominant {liveReadout.dominantAxis} · gesture {liveReadout.resolved} · pass {liveReadout.pass ? "YES" : "NO"} · Y±{DIRECTION.YAW_LEFT_SIGN} · mirrored {DIRECTION.MIRRORED ? "yes" : "no"} · idx {integrity.currentIdx} · passed {integrity.passed}/{challenges.length} · refSig {integrity.refCaptured ? "✓" : "—"} · sim {integrity.liveSim.toFixed(2)} · {integrity.decision}
                 </p>
+                {padReadout && (
+                  <p className="mt-1 text-[10px] text-white/40">
+                    PAD moiré {padReadout.moire.toFixed(2)} · flicker {padReadout.flicker.toFixed(2)} · planar {padReadout.planar.toFixed(2)} · shoulders {padReadout.shouldersVisible === null ? "—" : padReadout.shouldersVisible ? "✓" : "✗"} ({padReadout.shoulderSpanRatio.toFixed(2)}×face) · active {active?.kind ?? "—"}
+                  </p>
+                )}
               </>
             )}
           </div>
@@ -1818,6 +1950,11 @@ function LivenessScreen({
                   animationIterationCount: 2,
                 }}
               />
+            )}
+
+            {/* SLICE 3: FollowDot overlay */}
+            {phase === "liveness" && !inCapture && active?.kind === "followDot" && (
+              <FollowDotOverlay onSide={onDotSide} />
             )}
 
             <div
@@ -2088,3 +2225,47 @@ function drawOverlay(
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.stroke();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLICE 3: FollowDot overlay — animates a dot to 4 positions and reports the
+// dot's side (relative to centre) so the followDot evaluator can verify the
+// user's head/gaze tracks it. Mirror-correct: the camera is CSS-mirrored, so
+// the screen-x sign already matches the user's perceived left/right.
+// ─────────────────────────────────────────────────────────────────────────────
+function FollowDotOverlay({
+  onSide,
+}: {
+  onSide?: (side: { x: -1 | 0 | 1; y: -1 | 0 | 1 }) => void;
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0.15, y: 0.5 });
+  useEffect(() => {
+    const positions: { x: number; y: number; side: { x: -1 | 0 | 1; y: -1 | 0 | 1 } }[] = [
+      { x: 0.12, y: 0.5, side: { x: -1, y: 0 } },
+      { x: 0.88, y: 0.5, side: { x: 1, y: 0 } },
+      { x: 0.5, y: 0.15, side: { x: 0, y: -1 } },
+      { x: 0.5, y: 0.85, side: { x: 0, y: 1 } },
+    ];
+    let i = 0;
+    const tick = () => {
+      const p = positions[i % positions.length];
+      setPos({ x: p.x, y: p.y });
+      onSide?.(p.side);
+      i++;
+    };
+    tick();
+    const id = window.setInterval(tick, 1400);
+    return () => {
+      window.clearInterval(id);
+      onSide?.({ x: 0, y: 0 });
+    };
+  }, [onSide]);
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      <div
+        className="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300 shadow-[0_0_20px_4px_rgba(110,231,183,0.7)] transition-all duration-500"
+        style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
+      />
+    </div>
+  );
+}
+
