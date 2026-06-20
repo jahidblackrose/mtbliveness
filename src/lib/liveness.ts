@@ -431,8 +431,9 @@ function axisDominance(yawChange: number, pitchChange: number): DominantAxis {
 }
 
 function nearNeutral(yawChange: number, pitchChange: number, yawTh: number, pitchTh: number) {
-  const yawNeutral = yawTh * 0.35;
-  const pitchNeutral = pitchTh * 0.35;
+  // Relaxed: user doesn't need to be perfectly centered before turning.
+  const yawNeutral = yawTh * 0.7;
+  const pitchNeutral = pitchTh * 0.7;
   return square(yawChange) <= square(yawNeutral) && square(pitchChange) <= square(pitchNeutral);
 }
 
