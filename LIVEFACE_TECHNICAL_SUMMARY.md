@@ -389,10 +389,13 @@ audio), and a `meta` JSON form field with at least:
   "expiresAt":        1718900120000,
   "nonceStale":       false,
   "consent": { "accepted": true, "version": "v1", "acceptedAt": 1718900001000 },
-  "challengeOrder":   ["turnLeft","blink","smile"],
+  "challengeOrder":   ["blink","turnLeft","smile","randomSequence"],
   "challengeTimeline": [
-    {"kind":"turnLeft","startedAt":1718900010000,"finishedAt":1718900012400,"attempts":1,"passed":true},
-    ...
+    {"kind":"blink","startedAt":1718900010000,"finishedAt":1718900011200,"attempts":1,"passed":true},
+    {"kind":"turnLeft","startedAt":1718900011200,"finishedAt":1718900013400,"attempts":1,"passed":true},
+    {"kind":"smile","startedAt":1718900013400,"finishedAt":1718900014800,"attempts":1,"passed":true},
+    {"kind":"randomSequence","startedAt":1718900014800,"finishedAt":1718900017900,"attempts":1,"passed":true,
+     "meta":{"randomSequence":{"steps":["blink","mouthOpen"],"completedInOrder":true}}}
   ],
   "easyMode":         false,
   "attempts":         1,
@@ -401,7 +404,9 @@ audio), and a `meta` JSON form field with at least:
   "depth":            { "method": "blendshape-z-variance", "score": 0.71, "compliant": true },
   "parallax":         { "ok": true, "deltaNoseZ": 0.019 },
   "spoofFlags":       [],     // ["flat-surface", "no-motion", ...]
-  "identity":         { "simAtCapture": 0.83, "simMin": 0.71 },
+  "identity":         { "simAtCapture": 0.83, "simMin": 0.71, "continuous": true,
+                        "referenceLockedAt": "calibration-end" },
+
   "device":           { "userAgent": "...", "platform": "...", "language": "...", "timezone": "Asia/Dhaka",
                         "screen": {"w":1920,"h":1080,"dpr":1.25} },
   "camera":           { "label": "FaceTime HD Camera", "virtualCameraSuspected": false,
