@@ -243,7 +243,11 @@ function LiveFaceAI() {
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
 
   const hintKeyFor = (k: ChallengeKind) =>
-    k === "blink" ? "hintBlink" : k === "smile" ? "hintSmile" : k === "nod" ? "hintNod" : "hintTurn";
+    k === "blink" ? "hintBlink"
+    : k === "smile" ? "hintSmile"
+    : k === "nod" || k === "lookUp" || k === "lookDown" ? "hintNod"
+    : k === "mouthOpen" ? "mouthOpenHold"
+    : "hintTurn";
 
   useEffect(() => {
     stepRef.current = step;
