@@ -507,7 +507,9 @@ function LiveFaceAI() {
       setIntegrityDecision("ok");
       challengeRunningMsRef.current = 0;
       sessionStartRef.current = performance.now();
+      challengeTimelineRef.current = [];
       setStep("framing");
+
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       const L = langRef.current;
