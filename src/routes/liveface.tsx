@@ -767,6 +767,51 @@ function LiveFaceAI() {
         );
         sctx.drawImage(video, 0, 0, sample.width, sample.height);
         brightness = avgBrightness(sctx, sample.width, sample.height);
+
+        // ── SLICE 1: PAD scorers (advisory, throttled) ──
+        const pad = padRef.current;
+        pad.frame++;
+        // brightness history for flicker autocorr
+        pad.brightnessHist.push(brightness);
+        if (pad.brightnessHist.length > 30) pad.brightnessHist.shift();
+        // moiré every 4th frame
+        if (pad.frame % 4 === 0) {
+          try {
+            const imgd = sctx.getImageData(0, 0, sample.width, sample.height);
+            // grayscale
+            const gray = new Uint8ClampedArray(sample.width * sample.height);
+            for (let i = 0, j = 0; i < imgd.data.length; i += 4, j++) {
+              gray[j] = (imgd.data[i] + imgd.data[i + 1] + imgd.data[i + 2]) / 3;
+            }
+            pad.moire = moireEnergy(gray, sample.width, sample.height);
+          } catch { /* ignore */ }
+          pad.flicker = flickerScore(pad.brightnessHist);
+        }
+      }
+
+      // ── SLICE 2: shoulder/upper-body check (opt-in, low cadence) ──
+      const pose = poseRef.current;
+      if (pose.enabled && m) {
+        pose.frame++;
+        // FPS guard: degrade cadence if FPS is suffering
+        if (fps > 0 && fps < 18 && pose.cadence < 8) pose.cadence = pose.cadence * 2;
+        if (pose.frame % pose.cadence === 0 && !pose.loading) {
+          pose.loading = true;
+          getPoseDetector()
+            .then((det) => {
+              try {
+                const res = det.detectForVideo(video, ts);
+                pose.info = analyseShoulders(
+                  res,
+                  Math.max(0.05, m.faceSize),
+                  CONFIG.SHOULDER_SPAN_RATIO_MIN,
+                  CONFIG.SHOULDER_MOTION_MIN_STDDEV,
+                );
+              } catch { /* ignore */ }
+            })
+            .catch(() => { /* model load failed → silently disable */ pose.enabled = false; })
+            .finally(() => { pose.loading = false; });
+        }
       }
 
       drawOverlay(overlay, m, faces);
