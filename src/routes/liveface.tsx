@@ -1081,18 +1081,9 @@ function LiveFaceAI() {
             }
           }
         } else if (canRun && m && baseline) {
-          // Sample reference signature ONLY during active challenge engagement
-          // with the verified person (frontal-ish, one face, framing OK). Cap
-          // the buffer so we don't grow unbounded.
-          if (
-            result.faceLandmarks?.[0] &&
-            faces === 1 &&
-            Math.abs(m.yaw) < 0.22 &&
-            Math.abs(m.pitch) < 0.22 &&
-            refSigSamplesRef.current.length < 90
-          ) {
-            refSigSamplesRef.current.push(computeSignature(result.faceLandmarks[0]));
-          }
+          // (reference signature is now built/locked by the identity block
+          // above; no per-challenge sampling needed here.)
+
           const sinceShown = ts - challengePromptedAtRef.current;
           if (sinceShown >= CONFIG.PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
