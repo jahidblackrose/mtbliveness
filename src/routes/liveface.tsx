@@ -870,12 +870,68 @@ function LiveFaceAI() {
       // detection/timer and shows the bilingual hint. The user can recover
       // by getting alone again — no reset, no error screen.
 
-      // Update the live face signature each frame (used by Part B integrity).
+      // ── Identity gate: lock early, compare every frame to shutter ──
+      // Replaces the old post-pass-only finalize/compare so face-swap during
+      // or between challenges is caught, not just during the countdown.
       if (m && result.faceLandmarks?.[0]) {
         const sig = computeSignature(result.faceLandmarks[0]);
+        const prev = lastSignatureRef.current;
         lastSignatureRef.current = sig;
+
+        if (stepRef.current === "liveness" && baselineRef.current) {
+          const isFrontal = Math.abs(m.yaw) < 0.22 && Math.abs(m.pitch) < 0.22;
+
+          // (1) Build & lock the reference from the first clean frontal window.
+          if (referenceSigRef.current == null && isFrontal && faces === 1) {
+            refSigSamplesRef.current.push(sig);
+            if (refSigSamplesRef.current.length >= INTEGRITY.LOCK_MIN_SAMPLES) {
+              const locked = avgSignatures(refSigSamplesRef.current);
+              if (locked) {
+                referenceSigRef.current = locked;
+                identityLockedAtMsRef.current = Date.now();
+                setRefSigCaptured(true);
+              }
+            }
+          }
+
+          // (3) Continuity jump guard — catches smooth swaps without face-loss.
+          if (prev && referenceSigRef.current) {
+            const jump = 1 - signatureSimilarity(prev, sig);
+            if (jump > maxSigJumpRef.current) maxSigJumpRef.current = jump;
+            if (jump > INTEGRITY.MAX_SIG_JUMP) {
+              continuityBreaksRef.current += 1;
+              integrityRestart("changed");
+              return;
+            }
+          }
+
+          // (2) Continuous compare vs locked reference. Frontal-only so big
+          // expressions / head-turn challenges don't falsely trip the gate.
+          const ref = referenceSigRef.current;
+          if (ref) {
+            if (isFrontal) {
+              const sim = signatureSimilarity(ref, sig);
+              lastFrontalSimRef.current = sim;
+              if (sim < simMinRef.current) simMinRef.current = sim;
+              setLiveSim(sim);
+              if (sim < INTEGRITY.SIM_PASS) {
+                if (integrityFailStartRef.current == null) integrityFailStartRef.current = ts;
+                if (ts - integrityFailStartRef.current >= INTEGRITY.FAIL_SUSTAIN_MS) {
+                  integrityRestart("changed");
+                  return;
+                }
+              } else {
+                integrityFailStartRef.current = null;
+              }
+            } else {
+              // Non-frontal: hold last good sim; don't accumulate failures.
+              integrityFailStartRef.current = null;
+            }
+          }
+        }
       } else {
         lastSignatureRef.current = null;
+        integrityFailStartRef.current = null;
       }
 
       if (currentStep === "framing") {
