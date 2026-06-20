@@ -1208,26 +1208,10 @@ function LiveFaceAI() {
     setSubmitState("idle");
     setSubmitError("");
 
-    // If we still have a live stream, just rerun the post-pass capture
-    // (challenges already passed). Otherwise fall back to a full start.
-    const stream = streamRef.current;
-    if (stream && stream.getTracks().some((t) => t.readyState === "live")) {
-      startRecorder(stream);
-      // Mark all challenges done, jump to lookStraight + 3-2-1
-      challengesRef.current = challengesRef.current.map((c) => ({ ...c, done: true }));
-      setChallengeView([...challengesRef.current]);
-      captureSeqRef.current = "lookStraight";
-      setCaptureSeq("lookStraight");
-      setBigCountdown(null);
-      lookStraightHoldRef.current = null;
-      if (captureIntervalRef.current != null) {
-        window.clearInterval(captureIntervalRef.current);
-        captureIntervalRef.current = null;
-      }
-      setStep("liveness");
-      return;
-    }
+    // Always re-run the FULL flow (all challenges, then capture).
+    // Do not shortcut into the post-pass countdown.
     void start();
+
   }, [photoUrl, start, startRecorder, videoUrl]);
 
   const reset = useCallback(() => {
