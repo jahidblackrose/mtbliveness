@@ -497,6 +497,7 @@ function LiveFaceAI() {
       setEasyModeState(false);
       setEasyMode(false);
       resetDirectionCalibration();
+      resetPitchCalibration();
       setPaused(false);
       setSoftTimeoutIdx(null);
       setHintText("");
@@ -648,6 +649,7 @@ function LiveFaceAI() {
       captureBufRef.current = [];
       spoofRef.current = new SpoofGuard();
       resetDirectionCalibration();
+      resetPitchCalibration();
 
       // Reset integrity refs
       refSigSamplesRef.current = [];
