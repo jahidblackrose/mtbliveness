@@ -73,6 +73,7 @@ import {
   collectDeviceInfo,
   inspectCamera,
   pickChallengesFromNonce,
+  seqActionsFromNonce,
   digitsFromNonce,
   readSessionFromUrl,
   isNonceStale,
