@@ -1736,6 +1736,7 @@ function LivenessScreen({
     shouldersVisible: boolean | null;
   };
   tx: Tx;
+  lang: Lang;
 }) {
   const active = challenges[activeIdx];
   const totalSteps = challenges.length || 3;
