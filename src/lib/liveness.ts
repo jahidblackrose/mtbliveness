@@ -214,19 +214,31 @@ export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod"
 
 
 export function pickChallenges(): ChallengeKind[] {
-  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "lookUp", "lookDown"];
-  const head = heads[Math.floor(Math.random() * heads.length)];
-  const easyPool: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
-  for (let i = easyPool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [easyPool[i], easyPool[j]] = [easyPool[j], easyPool[i]];
+  const shuffle = <T,>(arr: T[]) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  // 3 from common pool with ≥1 head movement
+  const common: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+  const heads = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown"]);
+  let commonPicked: ChallengeKind[] = [];
+  for (let tries = 0; tries < 8; tries++) {
+    shuffle(common);
+    commonPicked = common.slice(0, 3);
+    if (commonPicked.some((k) => heads.has(k))) break;
   }
-  const picked: ChallengeKind[] = [head, easyPool[0], easyPool[1]];
-  for (let i = picked.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [picked[i], picked[j]] = [picked[j], picked[i]];
-  }
-  return picked;
+  // 1 surprise
+  const surprisePool: ChallengeKind[] = ["followDot", "randomSequence"];
+  shuffle(surprisePool);
+  const surprise = surprisePool[0];
+  // Insert surprise at random position → 4 challenges total
+  const insertAt = Math.floor(Math.random() * 4);
+  const picked = [...commonPicked];
+  picked.splice(insertAt, 0, surprise);
+  return picked.slice(0, 4);
 }
 
 
