@@ -645,7 +645,11 @@ function LiveFaceAI() {
   const tryAgainCurrent = useCallback(() => {
     // Policy: if any challenge fails/times out, restart ALL challenges from 0.
     const now = performance.now();
-    challengesRef.current = challengesRef.current.map((c) => newChallengeState(c.kind, now));
+    challengesRef.current = challengesRef.current.map((c) =>
+      c.kind === "randomSequence"
+        ? newChallengeState(c.kind, now, { seqActions: c.seqActions })
+        : newChallengeState(c.kind, now),
+    );
     setChallengeView([...challengesRef.current]);
     attemptsRef.current = challengesRef.current.map(() => 0);
     setActiveIdx(0);
