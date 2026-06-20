@@ -194,6 +194,18 @@ function LiveFaceAI() {
   const [devOpen, setDevOpen] = useState(false);
   const isDev = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("dev"), []);
 
+  // ── Session params from URL (host-provided nonce + flags) ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = readSessionFromUrl(window.location.search);
+    sessionParamsRef.current = p;
+    if (p.nonce) {
+      digitsRef.current = digitsFromNonce(p.nonce, 4);
+      setDigitsForVoice(digitsRef.current);
+    }
+  }, []);
+
+
   // Post-pass capture sequence: success → lookStraight → countdown → capturing
   type CaptureSeq = "idle" | "success" | "lookStraight" | "countdown" | "capturing";
   const [captureSeq, setCaptureSeq] = useState<CaptureSeq>("idle");
