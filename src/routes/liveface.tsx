@@ -1257,7 +1257,13 @@ function LiveFaceAI() {
         )}
         {step === "loading" && <LoadingScreen tx={tx} />}
 
+        {sessionParamsRef.current.enableVoice && digitsForVoice && (step === "framing" || step === "calibrating" || step === "liveness") && (
+          <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-center text-sm text-amber-200">
+            🎤 {tx("sayDigits", { digits: digitsForVoice })}
+          </div>
+        )}
         {(step === "framing" || step === "calibrating" || step === "liveness") && (
+
           <LivenessScreen
             phase={step}
             videoRef={videoRef}
