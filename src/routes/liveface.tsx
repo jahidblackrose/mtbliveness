@@ -261,10 +261,15 @@ function LiveFaceAI() {
   });
   const readoutAccumRef = useRef(0);
 
-  // ── Post-pass integrity gate: reference signature + live similarity ──
+  // ── Integrity gate: early-locked reference + continuous similarity ──
   const refSigSamplesRef = useRef<FaceSignature[]>([]);
   const referenceSigRef = useRef<FaceSignature | null>(null);
   const lastSignatureRef = useRef<FaceSignature | null>(null);
+  const identityLockedAtMsRef = useRef<number | null>(null);
+  const simMinRef = useRef<number>(1);
+  const lastFrontalSimRef = useRef<number>(1);
+  const maxSigJumpRef = useRef<number>(0);
+  const continuityBreaksRef = useRef<number>(0);
   const [refSigCaptured, setRefSigCaptured] = useState(false);
   const [liveSim, setLiveSim] = useState(1);
   const integrityFailStartRef = useRef<number | null>(null);
@@ -541,6 +546,11 @@ function LiveFaceAI() {
       refSigSamplesRef.current = [];
       referenceSigRef.current = null;
       lastSignatureRef.current = null;
+      identityLockedAtMsRef.current = null;
+      simMinRef.current = 1;
+      lastFrontalSimRef.current = 1;
+      maxSigJumpRef.current = 0;
+      continuityBreaksRef.current = 0;
       setRefSigCaptured(false);
       setLiveSim(1);
       integrityFailStartRef.current = null;
@@ -683,6 +693,11 @@ function LiveFaceAI() {
       refSigSamplesRef.current = [];
       referenceSigRef.current = null;
       lastSignatureRef.current = null;
+      identityLockedAtMsRef.current = null;
+      simMinRef.current = 1;
+      lastFrontalSimRef.current = 1;
+      maxSigJumpRef.current = 0;
+      continuityBreaksRef.current = 0;
       setRefSigCaptured(false);
       setLiveSim(1);
       integrityFailStartRef.current = null;
@@ -855,12 +870,68 @@ function LiveFaceAI() {
       // detection/timer and shows the bilingual hint. The user can recover
       // by getting alone again — no reset, no error screen.
 
-      // Update the live face signature each frame (used by Part B integrity).
+      // ── Identity gate: lock early, compare every frame to shutter ──
+      // Replaces the old post-pass-only finalize/compare so face-swap during
+      // or between challenges is caught, not just during the countdown.
       if (m && result.faceLandmarks?.[0]) {
         const sig = computeSignature(result.faceLandmarks[0]);
+        const prev = lastSignatureRef.current;
         lastSignatureRef.current = sig;
+
+        if (stepRef.current === "liveness" && baselineRef.current) {
+          const isFrontal = Math.abs(m.yaw) < 0.22 && Math.abs(m.pitch) < 0.22;
+
+          // (1) Build & lock the reference from the first clean frontal window.
+          if (referenceSigRef.current == null && isFrontal && faces === 1) {
+            refSigSamplesRef.current.push(sig);
+            if (refSigSamplesRef.current.length >= INTEGRITY.LOCK_MIN_SAMPLES) {
+              const locked = avgSignatures(refSigSamplesRef.current);
+              if (locked) {
+                referenceSigRef.current = locked;
+                identityLockedAtMsRef.current = Date.now();
+                setRefSigCaptured(true);
+              }
+            }
+          }
+
+          // (3) Continuity jump guard — catches smooth swaps without face-loss.
+          if (prev && referenceSigRef.current) {
+            const jump = 1 - signatureSimilarity(prev, sig);
+            if (jump > maxSigJumpRef.current) maxSigJumpRef.current = jump;
+            if (jump > INTEGRITY.MAX_SIG_JUMP) {
+              continuityBreaksRef.current += 1;
+              integrityRestart("changed");
+              return;
+            }
+          }
+
+          // (2) Continuous compare vs locked reference. Frontal-only so big
+          // expressions / head-turn challenges don't falsely trip the gate.
+          const ref = referenceSigRef.current;
+          if (ref) {
+            if (isFrontal) {
+              const sim = signatureSimilarity(ref, sig);
+              lastFrontalSimRef.current = sim;
+              if (sim < simMinRef.current) simMinRef.current = sim;
+              setLiveSim(sim);
+              if (sim < INTEGRITY.SIM_PASS) {
+                if (integrityFailStartRef.current == null) integrityFailStartRef.current = ts;
+                if (ts - integrityFailStartRef.current >= INTEGRITY.FAIL_SUSTAIN_MS) {
+                  integrityRestart("changed");
+                  return;
+                }
+              } else {
+                integrityFailStartRef.current = null;
+              }
+            } else {
+              // Non-frontal: hold last good sim; don't accumulate failures.
+              integrityFailStartRef.current = null;
+            }
+          }
+        }
       } else {
         lastSignatureRef.current = null;
+        integrityFailStartRef.current = null;
       }
 
       if (currentStep === "framing") {
@@ -946,32 +1017,10 @@ function LiveFaceAI() {
           // success (brief celebration) → lookStraight (hold) → 3-2-1 → capture
           const seq = captureSeqRef.current;
 
-          // Finalize the reference signature once at the boundary.
-          if (referenceSigRef.current == null && refSigSamplesRef.current.length > 0) {
-            referenceSigRef.current = avgSignatures(refSigSamplesRef.current);
-            setRefSigCaptured(!!referenceSigRef.current);
-          }
+          // (identity reference is now locked & compared continuously in the
+          // signature block above — no post-pass-only logic needed here.)
 
-          // Part B: continuously compare current face to reference signature.
-          // Only meaningful when reference exists and a face is present.
-          const ref = referenceSigRef.current;
-          const cur = lastSignatureRef.current;
-          if (ref && cur) {
-            const sim = signatureSimilarity(ref, cur);
-            setLiveSim(sim);
-            if (sim < INTEGRITY.SIM_PASS) {
-              if (integrityFailStartRef.current == null) integrityFailStartRef.current = ts;
-              if (ts - integrityFailStartRef.current >= INTEGRITY.FAIL_SUSTAIN_MS) {
-                integrityRestart("changed");
-                return;
-              }
-            } else {
-              integrityFailStartRef.current = null;
-            }
-          } else if (!cur) {
-            // No face present: don't accumulate mismatch time (Part A: pause).
-            integrityFailStartRef.current = null;
-          }
+
 
           if (seq === "idle") {
             captureSeqRef.current = "success";
@@ -1032,18 +1081,9 @@ function LiveFaceAI() {
             }
           }
         } else if (canRun && m && baseline) {
-          // Sample reference signature ONLY during active challenge engagement
-          // with the verified person (frontal-ish, one face, framing OK). Cap
-          // the buffer so we don't grow unbounded.
-          if (
-            result.faceLandmarks?.[0] &&
-            faces === 1 &&
-            Math.abs(m.yaw) < 0.22 &&
-            Math.abs(m.pitch) < 0.22 &&
-            refSigSamplesRef.current.length < 90
-          ) {
-            refSigSamplesRef.current.push(computeSignature(result.faceLandmarks[0]));
-          }
+          // (reference signature is now built/locked by the identity block
+          // above; no per-challenge sampling needed here.)
+
           const sinceShown = ts - challengePromptedAtRef.current;
           if (sinceShown >= CONFIG.PROMPT_READ_DELAY_MS) {
             // Accumulate active running time (only while engaged).
@@ -1264,6 +1304,13 @@ function LiveFaceAI() {
         videoSupported,
         videoMime: recorderMimeRef.current ?? null,
         integrityDecision,
+        identity: {
+          lockedAtMs: identityLockedAtMsRef.current,
+          simMin: simMinRef.current,
+          simAtCapture: lastFrontalSimRef.current,
+          maxSigJump: maxSigJumpRef.current,
+          continuityBreaks: continuityBreaksRef.current,
+        },
         ...(() => {
           // ── SLICE 1+2: PAD risk + upper-body presence (advisory) ──
           const pad = padRef.current;
