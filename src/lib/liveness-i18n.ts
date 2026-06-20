@@ -27,6 +27,19 @@ export const STRINGS = {
   turnLeft: { bn: "ধীরে মাথা বাঁ দিকে ঘোরান", en: "Slowly turn your head left" },
   turnRight: { bn: "ধীরে মাথা ডান দিকে ঘোরান", en: "Slowly turn your head right" },
   nod: { bn: "মাথা একবার উপরে-নিচে করুন", en: "Nod your head up and down once" },
+  lookUp: { bn: "মাথা উপরে তুলুন", en: "Tilt your head up" },
+  lookDown: { bn: "মাথা নিচে নামান", en: "Tilt your head down" },
+  mouthOpen: { bn: "মুখ বড় করে হাঁ করুন", en: "Open your mouth wide" },
+  mouthOpenHold: { bn: "হাঁ করে রাখুন…", en: "Hold it open…" },
+  pitchWrongWay: { bn: "নির্দেশ অনুযায়ী উপরে/নিচে করুন", en: "Follow the instruction — up or down" },
+  faceMovedHold: { bn: "মুখ সরে গেছে — সোজা ক্যামেরার দিকে তাকান", en: "Face moved — look straight at the camera" },
+  redoLiveness: { bn: "মুখ সরে যাওয়ায় আবার লাইভনেস যাচাই করতে হবে", en: "Face moved — liveness must be re-verified" },
+  tooBright: { bn: "অতিরিক্ত আলো — কম আলোয় চেষ্টা করুন", en: "Too bright — reduce the light" },
+  whiteBalance: { bn: "সাদা আলো ব্যবহার করুন", en: "Use white lighting" },
+  background: { bn: "সাদা ব্যাকগ্রাউন্ডের সামনে দাঁড়ান", en: "Stand against a white background" },
+  glare: { bn: "আলোর প্রতিফলন এড়িয়ে চলুন", en: "Avoid glare on your face" },
+  occlusion: { bn: "মুখ ঢেকে রাখবেন না", en: "Don't cover your face" },
+  eyeLevel: { bn: "ক্যামেরা চোখের সমান উচ্চতায় ধরুন", en: "Hold camera at eye level" },
 
   // Post-pass capture sequence
   lookStraight: { bn: "সোজা ক্যামেরার দিকে তাকান", en: "Look straight at the camera" },
@@ -221,6 +234,9 @@ export const CHALLENGE_KEY: Record<ChallengeKind, StringKey> = {
   turnLeft: "turnLeft",
   turnRight: "turnRight",
   nod: "nod",
+  lookUp: "lookUp",
+  lookDown: "lookDown",
+  mouthOpen: "mouthOpen",
 };
 
 export const GUIDANCE_KEY: Record<GuidanceKey, StringKey> = {
