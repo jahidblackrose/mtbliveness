@@ -48,6 +48,9 @@ export function ChallengeDemo({
       {kind === "lookUp" && <LookDemo size={size} direction="up" />}
       {kind === "lookDown" && <LookDemo size={size} direction="down" />}
       {kind === "mouthOpen" && <MouthOpenDemo size={size} />}
+      {kind === "followDot" && <FollowDotDemo size={size} />}
+      {kind === "randomSequence" && <RandomSeqDemo size={size} />}
+      {kind === "readDigits" && <RandomSeqDemo size={size} />}
     </div>
   );
 }
@@ -196,4 +199,34 @@ function MouthOpenDemo({ size }: { size: number }) {
     </svg>
   );
 }
+
+function FollowDotDemo({ size }: { size: number }) {
+  const s = size * 0.8;
+  return (
+    <svg viewBox="0 0 40 40" width={s} height={s} aria-hidden="true">
+      <style>{`
+        @keyframes lf-dot { 0%{cx:8;cy:20} 25%{cx:32;cy:8} 50%{cx:32;cy:32} 75%{cx:8;cy:32} 100%{cx:8;cy:20} }
+        .lf-dot { animation: lf-dot 2.4s ease-in-out infinite; }
+      `}</style>
+      <circle cx="20" cy="20" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" opacity="0.5" />
+      <circle className="lf-dot" cx="8" cy="20" r="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RandomSeqDemo({ size }: { size: number }) {
+  const s = size * 0.7;
+  return (
+    <svg viewBox="0 0 40 40" width={s} height={s} aria-hidden="true">
+      <style>{`
+        @keyframes lf-seq { 0%,40%{opacity:1} 50%,100%{opacity:0.25} }
+        @keyframes lf-seq2 { 0%,40%{opacity:0.25} 50%,100%{opacity:1} }
+      `}</style>
+      <text x="8" y="25" fill="currentColor" fontSize="14" style={{ animation: "lf-seq 1.8s ease-in-out infinite" }}>1</text>
+      <text x="18" y="25" fill="currentColor" fontSize="14" opacity="0.4">→</text>
+      <text x="28" y="25" fill="currentColor" fontSize="14" style={{ animation: "lf-seq2 1.8s ease-in-out infinite" }}>2</text>
+    </svg>
+  );
+}
+
 

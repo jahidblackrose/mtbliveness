@@ -210,7 +210,7 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 // ─────────────────────────────────────────────────────────────────────────────
 // Challenges
 // ─────────────────────────────────────────────────────────────────────────────
-export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen";
+export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "followDot" | "randomSequence" | "readDigits";
 
 
 export function pickChallenges(): ChallengeKind[] {
@@ -750,6 +750,13 @@ export function updateChallenge(
         done: heldMs >= 250, // MOUTH_OPEN_HOLD_MS
       };
     }
+    case "followDot":
+    case "randomSequence":
+    case "readDigits":
+    default:
+      // Phase B will implement these; for now keep state unchanged so
+      // the function always returns a ChallengeState.
+      return state;
   }
 }
 

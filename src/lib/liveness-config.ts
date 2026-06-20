@@ -70,6 +70,36 @@ export const CONFIG = {
   EYE_LEVEL_MAX_PITCH: 0.22,
   EYE_LEVEL_Y_BAND: 0.18,
   QUALITY_SAMPLE_HZ: 10,
+
+  // ── 4-challenge selection (Change 1) ──
+  CHALLENGE_COUNT: 4,
+  COMMON_POOL: ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"] as const,
+  SURPRISE_POOL: ["followDot", "randomSequence", "readDigits"] as const,
+  HEAD_KINDS: ["turnLeft", "turnRight", "lookUp", "lookDown"] as const,
+  FOLLOW_DOT_HOLD_MS: 700,
+  FOLLOW_DOT_AXIS_MIN: 0.12,
+
+  // ── Shoulder / upper-body (Change 3) ──
+  SHOULDER_GATE: true,
+  SHOULDER_SPAN_RATIO_MIN: 1.4,
+  SHOULDER_MOTION_MIN_STDDEV: 0.004,
+  POSE_SAMPLE_EVERY_N: 3,
+
+  // ── PAD / replay risk (Change 4) ──
+  FLASH_CHALLENGE: false,
+  MOIRE_ENERGY_MAX: 0.55,
+  FLICKER_SCORE_MAX: 0.45,
+  PLANAR_MOTION_MAX: 0.35,
+  REPLAY_RISK_THRESHOLD: 0.55,
+  REPLAY_RISK_WEIGHTS: {
+    "screen-artifact": 0.25,
+    "screen-flicker": 0.2,
+    "planar-motion": 0.2,
+    "flat-surface": 0.1,
+    "no-motion": 0.1,
+    "flash-mismatch": 0.1,
+    "virtualCameraSuspected": 0.15,
+  } as Record<string, number>,
 } as const;
 
 

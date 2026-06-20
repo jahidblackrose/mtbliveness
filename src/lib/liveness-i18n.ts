@@ -41,6 +41,23 @@ export const STRINGS = {
   occlusion: { bn: "মুখ ঢেকে রাখবেন না", en: "Don't cover your face" },
   eyeLevel: { bn: "ক্যামেরা চোখের সমান উচ্চতায় ধরুন", en: "Hold camera at eye level" },
 
+  // Surprise / unpredictable challenges (Change 1)
+  followDot: { bn: "বিন্দুটি চোখ দিয়ে অনুসরণ করুন", en: "Follow the dot with your eyes" },
+  followDotHint: { bn: "মাথা সামান্য ঘুরিয়ে বিন্দুর দিকে তাকান", en: "Move your head slightly toward the dot" },
+  randomSeq: { bn: "করুন: {a}, তারপর {b}", en: "Do: {a}, then {b}" },
+  surpriseHint: { bn: "অপ্রত্যাশিত ধাপ — মনোযোগ দিন", en: "Surprise step — pay attention" },
+
+  // Shoulder / upper-body (Change 3)
+  shouldersHint: { bn: "একটু পিছিয়ে যান, কাঁধসহ দেখান", en: "Move back a little so your shoulders are visible" },
+  shouldersOk: { bn: "কাঁধ দেখা যাচ্ছে ✓", en: "Shoulders visible ✓" },
+
+  // PAD / replay (Change 4) — advisory
+  replayRiskHigh: { bn: "সন্দেহজনক সংকেত — ম্যানুয়াল পর্যালোচনা প্রয়োজন হতে পারে", en: "Suspicious signal — manual review may be required" },
+  honestLimits: {
+    bn: "এই ব্রাউজার-ভিত্তিক চেকগুলো আক্রমণ কঠিন করে কিন্তু সম্পূর্ণ লাইভনেস নিশ্চিত করে না। সার্ভার চূড়ান্ত যাচাই করবে।",
+    en: "These browser checks raise attacker cost but don't certify liveness. The server makes the final decision.",
+  },
+
   // Post-pass capture sequence
   lookStraight: { bn: "সোজা ক্যামেরার দিকে তাকান", en: "Look straight at the camera" },
   hold: { bn: "স্থির থাকুন", en: "Hold still" },
@@ -237,6 +254,9 @@ export const CHALLENGE_KEY: Record<ChallengeKind, StringKey> = {
   lookUp: "lookUp",
   lookDown: "lookDown",
   mouthOpen: "mouthOpen",
+  followDot: "followDot",
+  randomSequence: "randomSeq",
+  readDigits: "sayDigits",
 };
 
 export const GUIDANCE_KEY: Record<GuidanceKey, StringKey> = {
