@@ -1487,6 +1487,7 @@ function LiveFaceAI() {
               shouldersVisible: poseRef.current.info?.shouldersVisible ?? null,
             }}
             tx={tx}
+            lang={lang}
           />
         )}
 
