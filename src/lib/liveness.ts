@@ -210,11 +210,11 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 // ─────────────────────────────────────────────────────────────────────────────
 // Challenges
 // ─────────────────────────────────────────────────────────────────────────────
-export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "followDot" | "randomSequence" | "readDigits";
+export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "randomSequence" | "readDigits";
 
 
-// Config flag: include lookUp/lookDown/followDot in default pool (off by default — harder/finickier).
-export const CHALLENGE_FLAGS = { enablePitchHead: false, enableFollowDot: false };
+// Config flag: include lookUp/lookDown in default pool (off by default — harder/finickier).
+export const CHALLENGE_FLAGS = { enablePitchHead: false };
 
 export function pickChallenges(): ChallengeKind[] {
   const shuffle = <T,>(arr: T[]) => {
