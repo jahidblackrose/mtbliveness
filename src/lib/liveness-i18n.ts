@@ -45,6 +45,9 @@ export const STRINGS = {
   followDot: { bn: "বিন্দুটি চোখ দিয়ে অনুসরণ করুন", en: "Follow the dot with your eyes" },
   followDotHint: { bn: "মাথা সামান্য ঘুরিয়ে বিন্দুর দিকে তাকান", en: "Move your head slightly toward the dot" },
   randomSeq: { bn: "করুন: {a}, তারপর {b}", en: "Do: {a}, then {b}" },
+  seqIntro: { bn: "দুটি ধাপ — একটির পর একটি করুন", en: "Two quick steps — one after another" },
+  seqProgress: { bn: "{n}/{t}", en: "{n}/{t}" },
+  seqNext: { bn: "এবার পরেরটি", en: "Now the next one" },
   surpriseHint: { bn: "অপ্রত্যাশিত ধাপ — মনোযোগ দিন", en: "Surprise step — pay attention" },
 
   // Shoulder / upper-body (Change 3)
@@ -269,3 +272,20 @@ export const GUIDANCE_KEY: Record<GuidanceKey, StringKey> = {
   straight: "straight",
   holdStill: "holdStill",
 };
+
+// Per-action SHORT labels used ONLY to inject into composite messages
+// (e.g. randomSequence sub-step hint). NOT used as a primary instruction —
+// for that, use CHALLENGE_KEY → STRINGS which has the full friendly sentence.
+export const ACTION_SHORT: Partial<Record<ChallengeKind, Pair>> = {
+  blink: { bn: "চোখের পলক ফেলুন", en: "blink" },
+  smile: { bn: "হাসুন", en: "smile" },
+  mouthOpen: { bn: "মুখ হাঁ করুন", en: "open your mouth" },
+  turnLeft: { bn: "বাঁ দিকে তাকান", en: "look left" },
+  turnRight: { bn: "ডান দিকে তাকান", en: "look right" },
+  lookUp: { bn: "উপরে তাকান", en: "look up" },
+  lookDown: { bn: "নিচে তাকান", en: "look down" },
+};
+export function actionShort(kind: ChallengeKind, lang: Lang): string {
+  const p = ACTION_SHORT[kind];
+  return p ? p[lang] : kind;
+}

@@ -274,13 +274,36 @@ export type ChallengeState = {
   // followDot / randomSequence (Phase B)
   dotSide?: { x: -1 | 0 | 1; y: -1 | 0 | 1 };
   seqStep?: 0 | 1;
+  seqActions?: [ChallengeKind, ChallengeKind]; // pair of single-action kinds, in order
+  seqSubState?: ChallengeState;                 // per-frame state of the current sub-action
 };
 
-export function newChallengeState(kind: ChallengeKind, now: number): ChallengeState {
+// Pool of single-action challenges eligible for the random sequence pair.
+// Excludes composites (followDot/randomSequence/readDigits) and nod (too similar
+// to lookUp/lookDown for a sub-step).
+const SEQ_POOL: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+export function pickSeqActions(rng: () => number = Math.random): [ChallengeKind, ChallengeKind] {
+  const arr = [...SEQ_POOL];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return [arr[0], arr[1]];
+}
+
+export function newChallengeState(
+  kind: ChallengeKind,
+  now: number,
+  opts?: { seqActions?: [ChallengeKind, ChallengeKind] },
+): ChallengeState {
   const base: ChallengeState = { kind, done: false, startedAt: now };
   if (kind === "blink")
     return { ...base, blinkCount: 0, blinkPhase: "open", blinkEma: 0, blinkLastCountedAt: 0 };
   if (kind === "smile") return { ...base, smileEma: 0, smileIntensity: 0 };
+  if (kind === "randomSequence") {
+    const actions = opts?.seqActions ?? pickSeqActions();
+    return { ...base, seqStep: 0, seqActions: actions, seqSubState: newChallengeState(actions[0], now) };
+  }
   return base;
 }
 
@@ -778,26 +801,28 @@ export function updateChallenge(
       return { ...state, smileHoldStart: holdStart, done: matching && now - (holdStart || now) >= 700 };
     }
     case "randomSequence": {
-      // Composite: blink → smile. Track sub-step in seqStep (0 = need blink, 1 = need smile).
+      // Composite: two nonce-seeded actions in order. Delegate per-frame
+      // evaluation to the active sub-action's own detector so each sub-step
+      // behaves identically to the single-action challenge.
+      const actions = state.seqActions ?? ["blink", "smile"];
       const step = state.seqStep ?? 0;
-      if (step === 0) {
-        // delegate to blink logic by reusing blink fields
-        const signal = m.blinkMax;
-        const prev = state.blinkEma ?? signal;
-        const ema = prev * 0.6 + signal * 0.4;
-        const closed = ema > (TH.BLINK_ABS * mul);
-        if (closed && state.blinkPhase !== "closed") {
-          return { ...state, blinkEma: ema, blinkPhase: "closed", seqStep: 1 };
+      const currentKind = actions[step];
+      const sub = state.seqSubState ?? newChallengeState(currentKind, now);
+      const updatedSub = updateChallenge(sub, m, baseline, now);
+      if (updatedSub.done) {
+        if (step === 0) {
+          // Advance to sub-step 2 with a freshly-initialised state for it.
+          const nextKind = actions[1];
+          return {
+            ...state,
+            seqStep: 1,
+            seqSubState: newChallengeState(nextKind, now),
+          };
         }
-        return { ...state, blinkEma: ema };
-      } else {
-        const signal = m.smileMax ?? 0;
-        const prev = state.smileEma ?? signal;
-        const ema = prev * 0.6 + signal * 0.4;
-        const above = ema > (TH.SMILE_ABS * mul);
-        const holdStart = above ? state.smileHoldStart ?? now : 0;
-        return { ...state, smileEma: ema, smileHoldStart: holdStart, done: above && now - (holdStart || now) >= TH.SMILE_HOLD_MS };
+        // Both sub-steps completed in order → composite passes.
+        return { ...state, seqSubState: updatedSub, done: true };
       }
+      return { ...state, seqSubState: updatedSub };
     }
     case "readDigits": {
       // Advisory; real ASR happens server-side. Mark done after a 2.5s presence

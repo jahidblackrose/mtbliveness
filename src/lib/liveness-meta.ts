@@ -133,6 +133,18 @@ export function digitsFromNonce(nonce: string, n = 4): string {
   return s;
 }
 
+// Deterministic 2-action pair for the randomSequence challenge.
+// Same nonce → same pair AND same order, so the server can re-derive + verify.
+export function seqActionsFromNonce(nonce: string): [ChallengeKind, ChallengeKind] {
+  const rng = mulberry32(strHash(`${nonce}:seq`));
+  const pool: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return [pool[0], pool[1]];
+}
+
 // ── Session parsing (URL-based, host-app provided) ──────────────────────
 export type SessionParams = {
   nonce: string | null;

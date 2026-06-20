@@ -41,6 +41,7 @@ import {
   GUIDANCE_KEY,
   type Lang,
   t,
+  actionShort,
 } from "@/lib/liveness-i18n";
 import { ChallengeDemo } from "@/components/challenge-demo";
 import { getPoseDetector, analyseShoulders, type UpperBodyInfo } from "@/lib/liveness-pose";
@@ -73,6 +74,7 @@ import {
   collectDeviceInfo,
   inspectCamera,
   pickChallengesFromNonce,
+  seqActionsFromNonce,
   digitsFromNonce,
   readSessionFromUrl,
   isNonceStale,
@@ -615,7 +617,11 @@ function LiveFaceAI() {
       ? sp.challengesFromHost
       : (sp.nonce ? pickChallengesFromNonce(sp.nonce) : pickChallenges());
     const now = performance.now();
-    const initial = chosen.map((k) => newChallengeState(k, now));
+    const initial = chosen.map((k) =>
+      k === "randomSequence" && sp.nonce
+        ? newChallengeState(k, now, { seqActions: seqActionsFromNonce(sp.nonce) })
+        : newChallengeState(k, now),
+    );
 
     challengesRef.current = initial;
     attemptsRef.current = initial.map(() => 0);
@@ -639,7 +645,11 @@ function LiveFaceAI() {
   const tryAgainCurrent = useCallback(() => {
     // Policy: if any challenge fails/times out, restart ALL challenges from 0.
     const now = performance.now();
-    challengesRef.current = challengesRef.current.map((c) => newChallengeState(c.kind, now));
+    challengesRef.current = challengesRef.current.map((c) =>
+      c.kind === "randomSequence"
+        ? newChallengeState(c.kind, now, { seqActions: c.seqActions })
+        : newChallengeState(c.kind, now),
+    );
     setChallengeView([...challengesRef.current]);
     attemptsRef.current = challengesRef.current.map(() => 0);
     setActiveIdx(0);
@@ -1268,6 +1278,15 @@ function LiveFaceAI() {
           poseProgress: c.poseProgress ?? 0,
           parallaxOk: c.parallaxOk ?? null,
         })),
+        randomSequence: (() => {
+          const c = challengesRef.current.find((x) => x.kind === "randomSequence");
+          if (!c || !c.seqActions) return null;
+          return {
+            steps: c.seqActions,
+            completedInOrder: c.done === true,
+            reachedStep: (c.seqStep ?? 0) + (c.done ? 1 : 0),
+          };
+        })(),
         blinkCount: challengesRef.current
           .filter((c) => c.kind === "blink")
           .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
@@ -1477,6 +1496,7 @@ function LiveFaceAI() {
               shouldersVisible: poseRef.current.info?.shouldersVisible ?? null,
             }}
             tx={tx}
+            lang={lang}
           />
         )}
 
@@ -1673,6 +1693,7 @@ function LivenessScreen({
   onDotSide,
   padReadout,
   tx,
+  lang,
 }: {
   phase: "framing" | "calibrating" | "liveness";
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -1725,6 +1746,7 @@ function LivenessScreen({
     shouldersVisible: boolean | null;
   };
   tx: Tx;
+  lang: Lang;
 }) {
   const active = challenges[activeIdx];
   const totalSteps = challenges.length || 3;
@@ -1734,6 +1756,14 @@ function LivenessScreen({
   const amber = phase === "liveness" && timeLeft > 0 && timeLeft <= 5000;
   const inSoft = softTimeoutIdx != null;
   const inCapture = phase === "liveness" && captureSeq !== "idle";
+
+  // randomSequence: render the CURRENT sub-step as if it were its own challenge
+  // (full friendly prompt + demo + meter), with a small "{n}/2" progress chip.
+  const isSeq = !!active && active.kind === "randomSequence";
+  const seqStep = isSeq ? (active!.seqStep ?? 0) : 0;
+  const seqActions = isSeq ? active!.seqActions : undefined;
+  const displayActive = isSeq ? (active!.seqSubState ?? active!) : active;
+  const displayKind = displayActive?.kind ?? active?.kind;
 
   let headerLabel = "";
   if (phase === "framing") headerLabel = tx("framing");
@@ -1748,21 +1778,26 @@ function LivenessScreen({
   else if (captureSeq === "lookStraight") instruction = tx("lookStraight");
   else if (captureSeq === "countdown") instruction = tx("hold");
   else if (captureSeq === "capturing") instruction = tx("capturing");
-  else if (active) instruction = tx(CHALLENGE_KEY[active.kind]);
+  else if (active && displayKind) instruction = tx(CHALLENGE_KEY[displayKind]);
   else instruction = tx("allSet");
 
   let meterLine: string | null = null;
   let meterValue = 0;
-  if (phase === "liveness" && !inCapture && active) {
-    if (active.kind === "blink") {
-      meterLine = tx("blinkProgress", { n: active.blinkCount ?? 0 });
+  if (phase === "liveness" && !inCapture && displayActive) {
+    if (displayKind === "blink") {
+      meterLine = tx("blinkProgress", { n: displayActive.blinkCount ?? 0 });
       meterValue = blinkMeter;
-    } else if (active.kind === "smile") {
-      meterLine = (active.smileHoldStart ?? 0) > 0 ? tx("smileHold") : tx("showSmile");
-      meterValue = Math.max(smileMeter, active.smileIntensity ?? 0);
+    } else if (displayKind === "smile") {
+      meterLine = (displayActive.smileHoldStart ?? 0) > 0 ? tx("smileHold") : tx("showSmile");
+      meterValue = Math.max(smileMeter, displayActive.smileIntensity ?? 0);
     } else {
       meterLine = tx("slowSteady");
-      meterValue = Math.max(poseMeter, active.poseProgress ?? 0);
+      meterValue = Math.max(poseMeter, displayActive.poseProgress ?? 0);
+    }
+    if (isSeq && seqActions) {
+      const progress = tx("seqProgress", { n: seqStep + 1, t: 2 });
+      const nextHint = seqStep === 0 ? ` · ${actionShort(seqActions[1], lang)} →` : "";
+      meterLine = `${progress}  ·  ${meterLine ?? ""}${nextHint}`;
     }
   }
 
@@ -1847,12 +1882,17 @@ function LivenessScreen({
                     {paused ? tx("paused") : `${secondsLeft}s`}
                   </span>
                 )}
-                {phase === "liveness" && !inCapture && active?.kind === "blink" && (
+                {phase === "liveness" && !inCapture && displayKind === "blink" && displayActive && (
                   <span
                     key={blinkTick}
                     className="text-[11px] font-semibold text-emerald-300 animate-in zoom-in-50 duration-200"
                   >
-                    {tx("blinkProgress", { n: active.blinkCount ?? 0 })}
+                    {tx("blinkProgress", { n: displayActive.blinkCount ?? 0 })}
+                  </span>
+                )}
+                {phase === "liveness" && !inCapture && isSeq && (
+                  <span className="text-[10px] font-semibold tabular-nums text-sky-300 ring-1 ring-sky-400/30 rounded-full px-2 py-0.5">
+                    {tx("seqProgress", { n: seqStep + 1, t: 2 })}
                   </span>
                 )}
               </div>
@@ -1861,7 +1901,7 @@ function LivenessScreen({
             <div className="mt-1 flex items-center gap-3">
               {/* DEMO LEFT OF MESSAGE */}
               {showDemo && active && (
-                <ChallengeDemo kind={active.kind} done={active.done} size={56} />
+                <ChallengeDemo kind={displayKind ?? active.kind} done={displayActive?.done ?? active.done} size={56} />
               )}
               {!showDemo && (captureSeq === "success" || captureSeq === "capturing") && (
                 <div
