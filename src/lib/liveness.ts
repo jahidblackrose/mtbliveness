@@ -214,14 +214,14 @@ export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod"
 
 
 export function pickChallenges(): ChallengeKind[] {
-  // 3 challenges total. Always include at least one head movement (parallax
-  // check). The remaining two are easier expression actions. Order randomized
-  // per session as an anti-replay measure.
-  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "nod"];
+  const heads: ChallengeKind[] = ["turnLeft", "turnRight", "lookUp", "lookDown"];
   const head = heads[Math.floor(Math.random() * heads.length)];
-  // Two easy actions — blink and smile are both comfortable.
-  const picked: ChallengeKind[] = [head, "blink", "smile"];
-  // Fisher–Yates shuffle for random order.
+  const easyPool: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  for (let i = easyPool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [easyPool[i], easyPool[j]] = [easyPool[j], easyPool[i]];
+  }
+  const picked: ChallengeKind[] = [head, easyPool[0], easyPool[1]];
   for (let i = picked.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [picked[i], picked[j]] = [picked[j], picked[i]];
@@ -662,12 +662,106 @@ export function updateChallenge(
       };
     }
 
-    // Phase A stubs — wired in Phase B
     case "lookUp":
-    case "lookDown":
-    case "mouthOpen":
-      return state;
+    case "lookDown": {
+      const targetUp = state.kind === "lookUp";
+      const yawTh = TH.YAW_TURN_ABS * mul;
+      const pitchTh = PITCH.ABS * mul;
+      const pitchChange = m.pitch - baseline.pitch;
+      const yawChange = (m.yaw - baseline.yaw) * DIRECTION.YAW_LEFT_SIGN;
+      const dominantAxis = axisDominance(yawChange, pitchChange);
+
+      // Self-calibrate PITCH_UP_SIGN on first dominant pitch sample whose
+      // sign disagrees with the requested direction's expectation.
+      if (!PITCH.calibrated && dominantAxis === "pitch" && Math.abs(pitchChange) > pitchTh) {
+        // We have no a-priori truth; assume the user followed instruction the
+        // first time pitch goes dominant. Lock sign so the SAME direction
+        // (lookUp) maps to this observed sign for the rest of the session.
+        if (targetUp) PITCH.UP_SIGN = (pitchChange < 0 ? -1 : 1) as 1 | -1;
+        else PITCH.UP_SIGN = (pitchChange < 0 ? 1 : -1) as 1 | -1;
+        PITCH.calibrated = true;
+      }
+
+      const wantSign = targetUp ? PITCH.UP_SIGN : (-PITCH.UP_SIGN as 1 | -1);
+      const signedPitchChange = pitchChange * wantSign; // positive = correct direction
+      const neutralReady =
+        state.startedNearNeutral === true ||
+        nearNeutral(yawChange, pitchChange, yawTh, pitchTh);
+
+      const correctAxis = dominantAxis === "pitch";
+      const correctSign = signedPitchChange > pitchTh;
+      const pass = neutralReady && correctAxis && correctSign;
+
+      let wrongHint: HeadGestureDebug["wrongHint"];
+      if (!pass) {
+        if (dominantAxis === "yaw" && Math.abs(yawChange) > yawTh) wrongHint = "nodNotSide";
+        else if (correctAxis && signedPitchChange < -pitchTh * 0.5) wrongHint = "turnOtherWay";
+      }
+
+      const progress = Math.max(0, Math.min(1, signedPitchChange / pitchTh));
+      const debug: HeadGestureDebug = {
+        signedYaw: m.yaw * DIRECTION.YAW_LEFT_SIGN,
+        signedPitch: pitchChange * PITCH.UP_SIGN,
+        yawChange,
+        pitchChange,
+        dominantAxis,
+        resolved: dominantAxis === "pitch" ? "LOOK-UPDOWN" : (dominantAxis === "yaw" ? (yawChange > 0 ? "TURN-LEFT" : "TURN-RIGHT") : "none"),
+        pass,
+        correctAxis,
+        correctSign,
+        startedNearNeutral: neutralReady,
+        wrongHint,
+      };
+
+      return {
+        ...state,
+        poseProgress: progress,
+        wrongWay: !!wrongHint,
+        wrongHint,
+        startedNearNeutral: neutralReady,
+        headDebug: debug,
+        done: pass,
+      };
+    }
+
+    case "mouthOpen": {
+      const signal = m.jawOpen;
+      const prev = state.smileEma ?? signal; // reuse smileEma slot for jaw EMA
+      const ema = prev * 0.5 + signal * 0.5;
+      const rise = ema - (baseline.jawNeutral ?? 0);
+      const deltaTh = 0.25 * mul;        // MOUTH_OPEN_DELTA
+      const absTh = 0.40 * mul;          // MOUTH_OPEN_ABS
+      const smileLow = m.smileMax < 0.7; // MOUTH_OPEN_SMILE_MAX
+      const open = (rise > deltaTh || ema > absTh) && smileLow;
+
+      let holdStart = state.smileHoldStart;
+      if (open) {
+        if (!holdStart) holdStart = now;
+      } else {
+        holdStart = undefined;
+      }
+      const heldMs = holdStart ? now - holdStart : 0;
+      const intensity = Math.max(0, Math.min(1, Math.max(rise / (deltaTh * 1.5), ema / (absTh * 1.2))));
+      return {
+        ...state,
+        smileEma: ema,
+        smileHoldStart: holdStart,
+        smileIntensity: intensity,
+        done: heldMs >= 250, // MOUTH_OPEN_HOLD_MS
+      };
+    }
   }
+}
+
+// Signed pitch (look up vs look down) — self-calibrating per session.
+export const PITCH = {
+  ABS: 0.18,
+  UP_SIGN: -1 as 1 | -1, // negative pitch typically = chin up in MediaPipe matrix
+  calibrated: false,
+};
+export function resetPitchCalibration() {
+  PITCH.calibrated = false;
+  PITCH.UP_SIGN = -1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
