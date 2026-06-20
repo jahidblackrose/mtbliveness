@@ -192,103 +192,105 @@ identity reference for the post-pass integrity gate.
 
 ### 8.1 Selection
 
-Three challenges per session: exactly one head movement
-(`turnLeft | turnRight | nod`) plus `blink` + `smile`, then Fisher-Yates
-shuffled. If a `nonce` is present we seed a deterministic PRNG
+**Four** challenges per session, nonce-seeded order:
+
+- **2 easy** picks from `{ blink, smile, mouthOpen }` (no duplicates).
+- **1 single easy head turn**: either `turnLeft` **or** `turnRight` (never
+  both, never paired together — only one head movement per session, to
+  preserve a single parallax / depth cue without overburdening the user).
+- **1 surprise** from `{ randomSequence }` (+ `readDigits` when
+  `voice=1`). `followDot`, `lookUp`, `lookDown`, and `nod` are **removed**
+  from all selection pools (kept behind disabled `CHALLENGE_FLAGS` only).
+
+If a `nonce` is present we seed a deterministic PRNG
 (`mulberry32(FNV-1a(nonce))`) so the same nonce always yields the same
-order — the server can therefore predict (and verify) what the user was
-asked to do.
+4-tuple and order — the server can predict and verify what the user was
+asked to do (`pickChallengesFromNonce` in `liveness-meta.ts`).
 
 ### 8.2 Blink (`updateChallenge` case `"blink"`)
 
-Signal: `blinkMax`, EMA-smoothed (`α = 0.6` on new sample).
-Two-track threshold (relative OR absolute fires):
+Signal: `blinkMax`, EMA-smoothed (`α = 0.6`). Two-track threshold:
 
 - closed-state enter: `ema > baseline.blinkOpen + 0.20` **or** `ema > 0.45`
 - open-state re-enter: `ema < baseline.blinkOpen + 0.08` **and** `ema < 0.30`
 
-State machine `open → closed → open` increments a counter; a refractory
-window (`BLINK_REFRACTORY_MS = 150 ms`) prevents one blink from being
-double-counted. The challenge passes when `count ≥ 2` blinks.
+State machine `open → closed → open` increments a counter; refractory
+window `BLINK_REFRACTORY_MS = 150 ms` prevents double-counting. Passes
+when `count ≥ 2`.
 
 ### 8.3 Smile (`updateChallenge` case `"smile"`)
 
-Signal: `smileMax`, EMA-smoothed. Passes if **either**
-`rise > 0.10` (above neutral) **or** `ema > 0.30` (absolute) holds for
-`SMILE_HOLD_MS = 180 ms`, **and** `jawOpen < 0.7` (rejects talking/yawn).
-A `smileIntensity` 0..1 drives the live meter.
+Signal: `smileMax`, EMA-smoothed. Passes if **either** `rise > 0.10`
+**or** `ema > 0.30` holds for `SMILE_HOLD_MS = 180 ms`, **and**
+`jawOpen < 0.7` (rejects talking/yawn).
 
-### 8.4 Head-turn (LEFT/RIGHT) — SIGNED, axis-dominant
+### 8.4 Mouth-open (`updateChallenge` case `"mouthOpen"`)
 
-Implemented in `inspectHeadGesture`:
+Signal: `jawOpen`. Passes on a sustained open beyond baseline neutral.
+Replaces `nod` as the "third easy" option.
 
-```
-yawChange   = (m.yaw - baseline.yaw) * YAW_LEFT_SIGN
-pitchChange =  m.pitch - baseline.pitch
+### 8.5 Head-turn (LEFT/RIGHT) — eased, nose-authoritative
 
-dominantAxis = "yaw"   if yawChange² >  1.05 · pitchChange²
-               "pitch" if pitchChange² > 1.05 · yawChange²
-               "none"  otherwise
-
-targetDir = +1 (turnLeft)  or  -1 (turnRight)
-correctAxis = dominantAxis == "yaw"
-correctSign = yawChange * targetDir  >  YAW_TURN_ABS   (default 0.20)
-pass        = startedNearNeutral && correctAxis && correctSign
-```
-
-Key properties:
-
-- The pass condition uses **signed** yaw — turning the *wrong* direction
-  with the same magnitude **does not** pass. The previous bug where any
-  movement passed both `turnLeft` and `turnRight` is structurally fixed.
-- Axis dominance gate: a diagonal head movement that crosses the yaw
-  threshold but is mostly pitch is rejected (`wrongHint: "wrongDir"`).
-- `startedNearNeutral` requires the user to be in their resting pose
-  **before** the gesture starts, so an already-turned head doesn't
-  silently auto-pass.
-
-### 8.5 Mirror / sign self-calibration (`calibrateYawSignFromNose`)
-
-Selfie video is CSS-mirrored (`scaleX(-1)`) for user comfort. Landmarks
-themselves are **not** mirrored, but device/model variance can flip the
-sign of `yaw` for "user's left". On the first turn we cross-check:
-
-- `noseChange = (m.noseDx - baseline.noseDx) * NOSE_LEFT_SIGN` —
-  in the unmirrored landmark space, the nose moves toward image-right
-  (`x` increases) when the user turns to their physical left, so the
-  reference sign is `+1`.
-- If the nose says "user is turning toward the prompt direction" but
-  the signed yaw says "user is turning the opposite way", we flip
-  `YAW_LEFT_SIGN` once for the session and mark calibration done.
-- Pass still depends on canonical signed yaw — nose offset only votes
-  on what "their left" means.
-
-### 8.6 Nod (PITCH only)
+Implemented in `inspectHeadGesture`. Defaults relaxed from earlier
+versions: `YAW_TURN_ABS = 0.12` (was 0.20), `NOSE_TURN_ABS = 0.10`
+(was 0.16), `nearNeutral` multiplier raised 0.35 → 0.7 so the user does
+not need to be perfectly centered before starting.
 
 ```
-correctAxis = dominantAxis == "pitch"
-correctSign = |pitchChange| > PITCH_NOD_ABS   (default 0.18)
-pass        = startedNearNeutral && correctAxis && correctSign
+yawChange   = (m.yaw   - baseline.yaw)   * YAW_LEFT_SIGN
+noseChange  = (m.noseDx - baseline.noseDx) * NOSE_LEFT_SIGN
+targetDir   = +1 (turnLeft) | -1 (turnRight)
+
+yawVote   = yawChange  * targetDir  >  YAW_TURN_ABS
+noseVote  = noseChange * targetDir  >  NOSE_TURN_ABS
+pass      = startedNearNeutral && (yawVote || noseVote)
 ```
 
-If the user turns sideways while we asked for a nod, `wrongHint =
-"nodNotSide"` and the UI surfaces a bilingual hint
-("মাথা উপরে-নিচে করুন, পাশে নয়" / "Move your head up and down, not sideways").
+- **Nose is authoritative for direction.** `wrongDir` is only surfaced
+  when the *nose* confirms the opposite-side movement; a noisy yaw sign
+  alone never raises "wrong direction".
+- Single easy turn only — `nod` is no longer selected.
 
-### 8.7 Auto-assist
+### 8.6 Mirror / sign self-calibration (`calibrateYawSignFromNose`)
 
-After `ASSIST_AFTER_MS = 2500 ms` on the current challenge, all numeric
-thresholds for that challenge are multiplied by `ASSIST_FACTOR = 0.65`
-(easier). This only helps users struggling with calibration; it does not
-remove the sign / axis-dominance gates.
+Selfie video is CSS-mirrored (`scaleX(-1)`); landmarks are not.
+`YAW_LEFT_SIGN` is **locked from the first confident nose movement**
+(nose is the ground truth for "user's left"). If signed yaw disagrees
+with nose direction, `YAW_LEFT_SIGN` is flipped once for the session.
+This eliminates the "wrong direction" failure caused by yaw sign drift.
 
-### 8.8 Fail-forward semantics
+### 8.7 Random sequence (surprise challenge)
 
-- Passed challenges are **locked**. A failure (wrong action, timeout)
-  only retries the *current* challenge, never the earlier ones.
-- A challenge has `CHALLENGE_TIMEOUT_MS = 20 000 ms` (30 000 in easy
-  mode). On timeout we offer a retry up to `MAX_ATTEMPTS = 3`.
-- The whole session caps at `SESSION_TIMEOUT_MS = 120 000 ms`.
+A nonce-seeded ordered pair of two easy actions (e.g. "Blink, then
+Smile"). Picked by `pickSeqActions` / `seqActionsFromNonce`, which:
+
+- draws both steps from `{ blink, smile, mouthOpen }` (head moves never
+  appear inside a sequence — they're reserved for the dedicated turn
+  slot);
+- the pair and order are deterministic from the nonce, so the server
+  re-derives and verifies them;
+- the UI shows fully-rendered, localized labels (no `{a}`/`{b}` template
+  leaks) plus animated demos for each sub-step;
+- meta records `randomSequence = { steps: [a,b], completedInOrder }`.
+
+### 8.8 Auto-assist
+
+After `ASSIST_AFTER_MS = 2500 ms` on the current challenge, numeric
+thresholds for that challenge are multiplied by `ASSIST_FACTOR = 0.65`.
+Sign / axis-dominance gates are not removed.
+
+### 8.9 Fail-forward semantics
+
+- Passed challenges are **locked**. A failure only retries the current
+  challenge, never earlier ones.
+- `CHALLENGE_TIMEOUT_MS = 20 000 ms` (30 000 ms in easy mode), up to
+  `MAX_ATTEMPTS = 3` per challenge.
+- Whole session capped at `SESSION_TIMEOUT_MS = 120 000 ms`.
+- **Retake always restarts the full flow** — all 4 challenges run
+  again, then capture. Already-passed challenges are *not* skipped to a
+  direct re-shutter.
+
+
 
 ---
 
