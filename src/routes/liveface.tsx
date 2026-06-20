@@ -1278,6 +1278,15 @@ function LiveFaceAI() {
           poseProgress: c.poseProgress ?? 0,
           parallaxOk: c.parallaxOk ?? null,
         })),
+        randomSequence: (() => {
+          const c = challengesRef.current.find((x) => x.kind === "randomSequence");
+          if (!c || !c.seqActions) return null;
+          return {
+            steps: c.seqActions,
+            completedInOrder: c.done === true,
+            reachedStep: (c.seqStep ?? 0) + (c.done ? 1 : 0),
+          };
+        })(),
         blinkCount: challengesRef.current
           .filter((c) => c.kind === "blink")
           .reduce((s, c) => s + (c.blinkCount ?? 0), 0),
