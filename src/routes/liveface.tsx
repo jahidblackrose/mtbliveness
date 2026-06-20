@@ -1947,6 +1947,11 @@ function LivenessScreen({
               />
             )}
 
+            {/* SLICE 3: FollowDot overlay */}
+            {phase === "liveness" && !inCapture && active?.kind === "followDot" && (
+              <FollowDotOverlay onSide={onDotSide} />
+            )}
+
             <div
               className={`pointer-events-none absolute inset-0 bg-white transition-opacity duration-150 ${
                 flash ? "opacity-70" : "opacity-0"
