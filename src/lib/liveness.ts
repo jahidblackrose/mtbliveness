@@ -213,6 +213,9 @@ export function finalizeBaseline(acc: CalibAccumulator): Baseline {
 export type ChallengeKind = "blink" | "smile" | "turnLeft" | "turnRight" | "nod" | "lookUp" | "lookDown" | "mouthOpen" | "followDot" | "randomSequence" | "readDigits";
 
 
+// Config flag: include lookUp/lookDown/followDot in default pool (off by default — harder/finickier).
+export const CHALLENGE_FLAGS = { enablePitchHead: false, enableFollowDot: false };
+
 export function pickChallenges(): ChallengeKind[] {
   const shuffle = <T,>(arr: T[]) => {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -221,24 +224,32 @@ export function pickChallenges(): ChallengeKind[] {
     }
     return arr;
   };
-  // 3 from common pool with ≥1 head movement
-  const common: ChallengeKind[] = ["blink", "smile", "mouthOpen", "turnLeft", "turnRight", "lookUp", "lookDown"];
-  const heads = new Set<ChallengeKind>(["turnLeft", "turnRight", "lookUp", "lookDown"]);
-  let commonPicked: ChallengeKind[] = [];
-  for (let tries = 0; tries < 8; tries++) {
-    shuffle(common);
-    commonPicked = common.slice(0, 3);
-    if (commonPicked.some((k) => heads.has(k))) break;
-  }
-  // 1 surprise
-  const surprisePool: ChallengeKind[] = ["followDot", "randomSequence"];
+  // Easy actions: pick 3 from {blink, smile, mouthOpen}.
+  const easy: ChallengeKind[] = ["blink", "smile", "mouthOpen"];
+  shuffle(easy);
+  const easyPicked = easy.slice(0, 3);
+
+  // Exactly ONE head movement — the easiest kind only: a single small turn.
+  const headPool: ChallengeKind[] = CHALLENGE_FLAGS.enablePitchHead
+    ? ["turnLeft", "turnRight", "lookUp", "lookDown"]
+    : ["turnLeft", "turnRight"];
+  shuffle(headPool);
+  const head = headPool[0];
+
+  // Surprise: prefer randomSequence; followDot only behind a flag.
+  const surprisePool: ChallengeKind[] = CHALLENGE_FLAGS.enableFollowDot
+    ? ["randomSequence", "followDot"]
+    : ["randomSequence"];
   shuffle(surprisePool);
   const surprise = surprisePool[0];
-  // Insert surprise at random position → 4 challenges total
-  const insertAt = Math.floor(Math.random() * 4);
-  const picked = [...commonPicked];
-  picked.splice(insertAt, 0, surprise);
-  return picked.slice(0, 4);
+
+  // Insert surprise + head at random positions among easy → 4 total.
+  const picked = [...easyPicked];
+  // Replace one easy slot with the head action to keep count = 4 incl. surprise.
+  // Order: 2 easy + 1 head + 1 surprise, shuffled.
+  const base: ChallengeKind[] = [easyPicked[0], easyPicked[1], head, surprise];
+  shuffle(base);
+  return base.slice(0, 4);
 }
 
 
