@@ -277,8 +277,7 @@ export type ChallengeState = {
   nodPhase?: "neutral" | "down" | "up";
   nodPitchEma?: number;
   nodBasePitch?: number;
-  // followDot / randomSequence (Phase B)
-  dotSide?: { x: -1 | 0 | 1; y: -1 | 0 | 1 };
+  // randomSequence (Phase B)
   seqStep?: 0 | 1;
   seqActions?: [ChallengeKind, ChallengeKind]; // pair of single-action kinds, in order
   seqSubState?: ChallengeState;                 // per-frame state of the current sub-action
