@@ -59,8 +59,20 @@ export const Route = createFileRoute("/liveface")({
 });
 
 import { API_ENDPOINT, API_KEY, CONFIG } from "@/lib/liveness-config";
+import {
+  sha256Blob,
+  collectDeviceInfo,
+  inspectCamera,
+  pickChallengesFromNonce,
+  digitsFromNonce,
+  readSessionFromUrl,
+  isNonceStale,
+  type SessionParams,
+  type CameraInspection,
+} from "@/lib/liveness-meta";
 
-type Step = "start" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error";
+type Step = "start" | "consent" | "loading" | "framing" | "calibrating" | "liveness" | "result" | "error" | "blocked";
+
 
 
 function pickVideoMime(): string | undefined {
