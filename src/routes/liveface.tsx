@@ -1392,7 +1392,7 @@ function LiveFaceAI() {
             : "'Inter', system-ui, sans-serif",
       }}
     >
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6 lg:max-w-5xl lg:px-6">
+      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
         <header className="flex items-center justify-between gap-2 pb-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
@@ -1828,9 +1828,9 @@ function LivenessScreen({
       {/* TWO-ZONE LAYOUT: message band on top (mobile) / left (desktop),
           camera card below (mobile) / right (desktop). The instruction
           never overlaps the face. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start lg:gap-6">
+      <div className="flex flex-col gap-4">
         {/* MESSAGE BAND */}
-        <div className="order-1 lg:order-1">
+        <div className="order-1">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 shadow-md">
             {(phase === "liveness" || phase === "calibrating") && !inCapture && (
               <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/15">
@@ -1988,7 +1988,7 @@ function LivenessScreen({
         </div>
 
         {/* CAMERA CARD (right on desktop, below on mobile) */}
-        <div className="order-2 lg:order-2 lg:justify-self-end w-full">
+        <div className="order-2 w-full">
           <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
             <video
               ref={videoRef}
