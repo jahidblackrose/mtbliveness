@@ -157,7 +157,7 @@ function speakNow(text: string, lang: Lang): void {
     }
     u.rate = rateFor(lang);
     u.pitch = CONFIG.TTS_PITCH;
-    u.volume = 1;
+    u.volume = (CONFIG as { TTS_VOLUME?: number }).TTS_VOLUME ?? 1;
     u.onstart = () => setSpeaking(true);
     const finish = () => {
       setSpeaking(false);

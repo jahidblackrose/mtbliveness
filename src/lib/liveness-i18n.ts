@@ -238,8 +238,8 @@ export const STRINGS = {
   // ── Human-verifier voice script (spoken only) ──
   // Warm greeting at the very first challenge.
   greeting: {
-    bn: "চলুন যাচাই করি এটা সত্যিই আপনি। একটু সময় লাগবে।",
-    en: "Let's verify it's really you. This will only take a moment.",
+    bn: "চলুন দ্রুত যাচাই করি এটা আপনি।",
+    en: "Let's quickly verify it's you.",
   },
   // Brief transition cue between challenges.
   transitionCue: { bn: "এবার পরেরটি…", en: "Now, next…" },
@@ -257,17 +257,17 @@ export const STRINGS = {
   },
   // Spoken-only friendly variants per challenge. Screen text stays short
   // (CHALLENGE_KEY), the SPOKEN line is warmer.
-  speakBlink: { bn: "এবার দয়া করে দুইবার চোখের পলক ফেলুন।", en: "Now, please blink twice for me." },
-  speakSmile: { bn: "এবার একটু হাসুন।", en: "Lovely — now give me a little smile." },
-  speakMouthOpen: { bn: "এবার মুখটা বড় করে হাঁ করুন।", en: "Now open your mouth wide, please." },
-  speakTurnLeft: { bn: "আস্তে করে মাথাটা বাঁ দিকে ঘোরান।", en: "Gently turn your head to your left." },
-  speakTurnRight: { bn: "এবার আস্তে করে ডান দিকে ঘোরান।", en: "And now gently to your right." },
-  speakLookUp: { bn: "এবার আস্তে করে মাথাটা উপরে তুলুন।", en: "Now gently tilt your head up." },
-  speakLookDown: { bn: "এবার আস্তে করে মাথাটা নিচে নামান।", en: "Now gently tilt your head down." },
-  speakNod: { bn: "মাথাটা একবার উপরে-নিচে করুন।", en: "Now nod your head up and down once." },
+  speakBlink: { bn: "দুইবার চোখের পলক ফেলুন।", en: "Please blink twice." },
+  speakSmile: { bn: "এবার একটু হাসুন।", en: "Now smile." },
+  speakMouthOpen: { bn: "মুখ বড় করে হাঁ করুন।", en: "Open your mouth wide." },
+  speakTurnLeft: { bn: "মাথা বাঁ দিকে ঘোরান।", en: "Turn your head left." },
+  speakTurnRight: { bn: "মাথা ডান দিকে ঘোরান।", en: "Turn your head right." },
+  speakLookUp: { bn: "মাথা উপরে তুলুন।", en: "Tilt your head up." },
+  speakLookDown: { bn: "মাথা নিচে নামান।", en: "Tilt your head down." },
+  speakNod: { bn: "মাথা একবার উপরে-নিচে করুন।", en: "Nod once up and down." },
   speakLookStraight: {
-    bn: "চমৎকার। এবার সোজা ক্যামেরার দিকে তাকিয়ে স্থির থাকুন।",
-    en: "Perfect. Now look straight at the camera and hold still.",
+    bn: "সোজা তাকিয়ে স্থির থাকুন।",
+    en: "Look straight and hold still.",
   },
 } as const satisfies Record<string, Pair>;
 
