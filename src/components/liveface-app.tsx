@@ -1,4 +1,4 @@
-
+import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaceLandmarker,
@@ -100,7 +100,7 @@ function pickVideoMime(): string | undefined {
 type VideoChunk = { ts: number; blob: Blob };
 
 
-export function LiveFaceAI() {
+function LiveFaceAI() {
   const [lang, setLang] = useState<Lang>("bn");
   const langRef = useRef<Lang>("bn");
   useEffect(() => {
