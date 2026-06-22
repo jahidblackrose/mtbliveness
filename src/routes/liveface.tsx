@@ -281,12 +281,14 @@ function LiveFaceAI() {
   const currentTimeoutRef = useRef<number>(CONFIG.CHALLENGE_TIMEOUT_MS);
   useEffect(() => { currentTimeoutRef.current = currentTimeoutMs; }, [currentTimeoutMs]);
 
-  const hintKeyFor = (k: ChallengeKind) =>
-    k === "blink" ? "hintBlink"
-    : k === "smile" ? "hintSmile"
-    : k === "nod" || k === "lookUp" || k === "lookDown" ? "hintNod"
-    : k === "mouthOpen" ? "mouthOpenHold"
-    : "hintTurn";
+  const hintKeyFor = (k: ChallengeKind, subKind?: ChallengeKind) => {
+    const target = subKind ?? k;
+    return target === "blink" ? "hintBlink"
+      : target === "smile" ? "hintSmile"
+      : target === "nod" || target === "lookUp" || target === "lookDown" ? "hintNod"
+      : target === "mouthOpen" ? "mouthOpen"
+      : "hintTurn";
+  };
 
   useEffect(() => {
     stepRef.current = step;
