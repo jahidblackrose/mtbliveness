@@ -16,7 +16,7 @@ let lastSpoken = "";
 let lastSpokenAt = 0;
 let speaking = false;
 let lastEndedAt = 0;
-let pending: { text: string; lang: Lang } | null = null;
+let pending: Array<{ text: string; lang: Lang }> = [];
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 const speakingListeners = new Set<(s: boolean) => void>();
 const endListeners = new Set<() => void>();
