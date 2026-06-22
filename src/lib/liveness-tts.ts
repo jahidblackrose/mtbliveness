@@ -14,6 +14,12 @@ type Listener = (voice: SpeechSynthesisVoice | null, lang: Lang) => void;
 let muted = false;
 let lastSpoken = "";
 let lastSpokenAt = 0;
+let speaking = false;
+let lastEndedAt = 0;
+let pending: { text: string; lang: Lang } | null = null;
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+const speakingListeners = new Set<(s: boolean) => void>();
+const endListeners = new Set<() => void>();
 const listeners = new Set<Listener>();
 const cache = new Map<Lang, SpeechSynthesisVoice | null>();
 
@@ -98,15 +104,77 @@ export function isMuted(): boolean {
   return muted;
 }
 
+export function isSpeaking(): boolean {
+  return speaking;
+}
+
+function setSpeaking(v: boolean): void {
+  if (speaking === v) return;
+  speaking = v;
+  for (const l of speakingListeners) { try { l(v); } catch { /* ignore */ } }
+  if (!v) {
+    lastEndedAt = Date.now();
+    for (const l of [...endListeners]) { try { l(); } catch { /* ignore */ } }
+  }
+}
+
+export function onSpeakingChange(l: (s: boolean) => void): () => void {
+  speakingListeners.add(l);
+  return () => { speakingListeners.delete(l); };
+}
+
 export function cancelSpeak(): void {
-  if (!supported()) return;
+  pending = null;
+  if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+  if (!supported()) { setSpeaking(false); return; }
   try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
   lastSpoken = "";
+  setSpeaking(false);
+}
+
+function rateFor(lang: Lang): number {
+  return lang === "bn" ? CONFIG.TTS_RATE_BN : CONFIG.TTS_RATE_EN;
+}
+
+function speakNow(text: string, lang: Lang): void {
+  if (!supported() || muted) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    const voice = resolveVoice(lang);
+    if (voice) {
+      u.voice = voice;
+      u.lang = voice.lang;
+    } else {
+      u.lang = lang === "bn" ? "bn-BD" : "en-IN";
+    }
+    u.rate = rateFor(lang);
+    u.pitch = CONFIG.TTS_PITCH;
+    u.volume = 1;
+    u.onstart = () => setSpeaking(true);
+    const finish = () => {
+      setSpeaking(false);
+      // Drain at most one queued utterance, after a small gap.
+      if (pending && !muted) {
+        const next = pending;
+        pending = null;
+        if (pendingTimer) { clearTimeout(pendingTimer); }
+        pendingTimer = setTimeout(() => {
+          pendingTimer = null;
+          speakNow(next.text, next.lang);
+        }, CONFIG.TTS_GAP_MS);
+      }
+    };
+    u.onend = finish;
+    u.onerror = finish;
+    setSpeaking(true); // optimistic; some browsers fire onstart late
+    window.speechSynthesis.speak(u);
+  } catch { setSpeaking(false); }
 }
 
 /**
  * Speak a sentence. Fire-and-forget; never throws and never blocks.
- * Cancels any in-flight utterance so prompts don't overlap.
+ * Queues at most ONE pending utterance (the latest) so messages don't get
+ * cut off mid-word, but also don't pile up.
  * De-dupes the same string within 1.2s to avoid repeats from re-renders.
  */
 export function speak(text: string, lang: Lang): void {
@@ -117,21 +185,44 @@ export function speak(text: string, lang: Lang): void {
   if (trimmed === lastSpoken && now - lastSpokenAt < 1200) return;
   lastSpoken = trimmed;
   lastSpokenAt = now;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(trimmed);
-    const voice = resolveVoice(lang);
-    if (voice) {
-      u.voice = voice;
-      u.lang = voice.lang;
-    } else {
-      u.lang = lang === "bn" ? "bn-BD" : "en-IN";
-    }
-    u.rate = CONFIG.TTS_RATE;
-    u.pitch = CONFIG.TTS_PITCH;
-    u.volume = 1;
-    window.speechSynthesis.speak(u);
-  } catch { /* ignore */ }
+  if (speaking) {
+    // Replace any older queued item with the newest request.
+    pending = { text: trimmed, lang };
+    return;
+  }
+  speakNow(trimmed, lang);
+}
+
+/**
+ * Wait until the current (and any single queued) utterance finishes plus a
+ * small gap. Resolves immediately if nothing is speaking, or after
+ * TTS_MAX_WAIT_MS as a safety cap so callers never hang.
+ */
+export function waitUntilSpoken(maxWaitMs: number = CONFIG.TTS_MAX_WAIT_MS): Promise<void> {
+  if (!supported() || muted) return Promise.resolve();
+  if (!speaking && !pending) {
+    const sinceEnd = Date.now() - lastEndedAt;
+    const wait = Math.max(0, CONFIG.TTS_GAP_MS - sinceEnd);
+    return wait === 0 ? Promise.resolve() : new Promise((r) => setTimeout(r, wait));
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      endListeners.delete(handler);
+      clearTimeout(cap);
+      resolve();
+    };
+    const handler = () => {
+      // Wait the gap, then if nothing else queued/speaking, finish.
+      setTimeout(() => {
+        if (!speaking && !pending) finish();
+      }, CONFIG.TTS_GAP_MS);
+    };
+    endListeners.add(handler);
+    const cap = setTimeout(finish, Math.max(0, maxWaitMs));
+  });
 }
 
 export function getSelectedVoice(lang: Lang): SpeechSynthesisVoice | null {

@@ -107,8 +107,12 @@ export const CONFIG = {
   // Upgrade path for guaranteed voice: pre-recorded audio clips or a cloud
   // TTS API (Google/Azure/ElevenLabs). Not implemented now.
   TTS_ENABLED: true,
-  TTS_RATE: 0.98,
-  TTS_PITCH: 1.05,
+  TTS_RATE: 0.98, // legacy fallback; per-language rates below take precedence
+  TTS_RATE_EN: 0.85,
+  TTS_RATE_BN: 0.9,
+  TTS_GAP_MS: 400,
+  TTS_MAX_WAIT_MS: 3000,
+  TTS_PITCH: 1.0,
   TTS_PREFER_LOCALES_BN: ["bn-BD", "bn-IN", "bn", "hi-IN"] as const,
   TTS_PREFER_LOCALES_EN: ["en-IN", "en-SG", "en-PH", "en-HK", "en-AU", "en-GB", "en-US", "en"] as const,
   TTS_FEMALE_NAME_HINTS: [
