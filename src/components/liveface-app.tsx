@@ -8,6 +8,7 @@ import {
 import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, Volume2, VolumeX, X } from "lucide-react";
 import {
   speak as ttsSpeak,
+  speakSequence as ttsSpeakSequence,
   cancelSpeak as ttsCancel,
   setMuted as ttsSetMuted,
   getSelectedVoice as ttsGetVoice,
