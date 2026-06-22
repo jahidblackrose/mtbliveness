@@ -100,6 +100,24 @@ export const CONFIG = {
     "flash-mismatch": 0.1,
     "virtualCameraSuspected": 0.15,
   } as Record<string, number>,
+
+  // ── Text-to-speech (voice instructions) ──
+  // Web Speech API: device-dependent voice availability. Many phones/laptops
+  // lack Bangla TTS; "female Asian" is best-effort with fallbacks.
+  // Upgrade path for guaranteed voice: pre-recorded audio clips or a cloud
+  // TTS API (Google/Azure/ElevenLabs). Not implemented now.
+  TTS_ENABLED: true,
+  TTS_RATE: 0.98,
+  TTS_PITCH: 1.05,
+  TTS_PREFER_LOCALES_BN: ["bn-BD", "bn-IN", "bn", "hi-IN"] as const,
+  TTS_PREFER_LOCALES_EN: ["en-IN", "en-SG", "en-PH", "en-HK", "en-AU", "en-GB", "en-US", "en"] as const,
+  TTS_FEMALE_NAME_HINTS: [
+    "female", "woman",
+    "heera", "kalpana", "swara", "aditi", "raveena", "veena", "priya", "neerja", "asha",
+    "google हिन्दी", "google বাংলা", "google bangla", "google bengali", "google hindi",
+    "samantha", "karen", "tessa", "victoria", "fiona", "moira", "serena", "zira",
+  ] as const,
+  TTS_MALE_NAME_HINTS: ["male", "rishi", "ravi", "daniel", "alex", "fred", "george"] as const,
 } as const;
 
 

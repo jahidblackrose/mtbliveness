@@ -5,7 +5,15 @@ import {
   FilesetResolver,
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
-import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, X } from "lucide-react";
+import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, Volume2, VolumeX, X } from "lucide-react";
+import {
+  speak as ttsSpeak,
+  cancelSpeak as ttsCancel,
+  setMuted as ttsSetMuted,
+  getSelectedVoice as ttsGetVoice,
+  listVoices as ttsListVoices,
+  onVoicesReady as ttsOnReady,
+} from "@/lib/liveness-tts";
 import { Button } from "@/components/ui/button";
 import {
   type ChallengeState,
@@ -92,6 +100,33 @@ export function LiveFaceAI() {
   useEffect(() => {
     langRef.current = lang;
   }, [lang]);
+
+  // ── Spoken voice instructions (TTS) ──
+  const [ttsMuted, setTtsMuted] = useState<boolean>(false);
+  const [ttsVoiceLabel, setTtsVoiceLabel] = useState<string>("—");
+  useEffect(() => {
+    ttsSetMuted(ttsMuted);
+  }, [ttsMuted]);
+  useEffect(() => {
+    const refresh = () => {
+      const v = ttsGetVoice(langRef.current);
+      setTtsVoiceLabel(v ? `${v.name} · ${v.lang}` : "—");
+    };
+    refresh();
+    const off = ttsOnReady(refresh);
+    return () => { off(); ttsCancel(); };
+  }, []);
+  useEffect(() => {
+    const v = ttsGetVoice(lang);
+    setTtsVoiceLabel(v ? `${v.name} · ${v.lang}` : "—");
+  }, [lang]);
+  const sayKey = useCallback(
+    (k: Parameters<typeof t>[0], vars?: Record<string, string | number>) => {
+      if (ttsMuted) return;
+      try { ttsSpeak(t(k, langRef.current, vars), langRef.current); } catch { /* ignore */ }
+    },
+    [ttsMuted],
+  );
   const tx = useCallback(
     (k: Parameters<typeof t>[0], vars?: Record<string, string | number>) => t(k, lang, vars),
     [lang],
@@ -235,6 +270,52 @@ export function LiveFaceAI() {
   const lookStraightHoldRef = useRef<number | null>(null);
   const lastFramingOkRef = useRef(false);
   const captureIntervalRef = useRef<number | null>(null);
+
+  // ── TTS: speak instructions on key state transitions ──
+  // (additive; never blocks frame loop; fire-and-forget)
+  useEffect(() => {
+    if (step === "framing") sayKey("center");
+    else if (step === "calibrating") sayKey("holdStillEllipsis");
+    else if (step === "start" || step === "result" || step === "error" || step === "blocked") ttsCancel();
+  }, [step, sayKey]);
+  useEffect(() => {
+    if (step !== "liveness") return;
+    if (captureSeq === "success") sayKey("allDone");
+    else if (captureSeq === "lookStraight") sayKey("lookStraight");
+    else if (captureSeq === "capturing") sayKey("capturing");
+  }, [captureSeq, step, sayKey]);
+  useEffect(() => {
+    if (bigCountdown == null) return;
+    if (ttsMuted) return;
+    // Speak the number in the active language (e.g. "৩"/"3").
+    const localized = lang === "bn"
+      ? String(bigCountdown).replace(/\d/g, (d) => "০১২৩৪৫৬৭৮৯"[Number(d)])
+      : String(bigCountdown);
+    try { ttsSpeak(localized, lang); } catch { /* ignore */ }
+  }, [bigCountdown, lang, ttsMuted]);
+
+  // Speak the active challenge prompt whenever the step/sub-step changes.
+  // For randomSequence we speak each sub-step (not the crammed sentence).
+  // Suppress TTS for the readDigits challenge when the mic is on, so the
+  // app's own voice isn't captured into the audio track.
+  const activeForTts = challengeView[activeIdx];
+  const activeKindForTts = activeForTts?.kind;
+  const activeSubKindForTts = activeForTts?.seqSubState?.kind;
+  useEffect(() => {
+    if (step !== "liveness") return;
+    if (captureSeq !== "idle") return;
+    if (!activeKindForTts) return;
+    const voiceMicOn = sessionParamsRef.current.enableVoice === true;
+    if (activeKindForTts === "readDigits" && voiceMicOn) {
+      ttsCancel();
+      return;
+    }
+    const speakKind = activeKindForTts === "randomSequence" ? activeSubKindForTts : activeKindForTts;
+    if (!speakKind) return;
+    const k = CHALLENGE_KEY[speakKind];
+    if (k) sayKey(k);
+  }, [step, captureSeq, activeKindForTts, activeSubKindForTts, sayKey]);
+
 
   const [liveReadout, setLiveReadout] = useState({
     blink: 0,
@@ -1386,8 +1467,47 @@ export function LiveFaceAI() {
             <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
             <h1 className="text-lg font-semibold tracking-tight">{tx("appName")}</h1>
           </div>
-          <LangToggle lang={lang} onChange={setLang} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTtsMuted((v) => !v)}
+              aria-pressed={ttsMuted}
+              aria-label={ttsMuted ? "Unmute voice instructions" : "Mute voice instructions"}
+              title={ttsMuted ? "Voice off" : "Voice on"}
+              className="inline-flex items-center gap-1 rounded-full border border-zinc-700/60 bg-zinc-900/60 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+            >
+              {ttsMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </button>
+            <LangToggle lang={lang} onChange={setLang} />
+          </div>
         </header>
+
+        {isDev && (
+          <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-[10px] text-zinc-400">
+            <div className="flex items-center justify-between gap-2">
+              <span>TTS voice: <span className="text-zinc-200">{ttsVoiceLabel}</span></span>
+              <button
+                type="button"
+                onClick={() => {
+                  try { ttsCancel(); } catch { /* ignore */ }
+                  try { ttsSpeak(t("center", lang), lang); } catch { /* ignore */ }
+                }}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-200 hover:bg-zinc-800"
+              >
+                Test speak
+              </button>
+            </div>
+            <details className="mt-1">
+              <summary className="cursor-pointer">All voices ({ttsListVoices().length})</summary>
+              <ul className="mt-1 max-h-24 overflow-y-auto pl-3">
+                {ttsListVoices().map((v) => (
+                  <li key={`${v.name}-${v.lang}`}>{v.name} · {v.lang}</li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        )}
+
 
         {step === "start" && (
           <StartScreen
