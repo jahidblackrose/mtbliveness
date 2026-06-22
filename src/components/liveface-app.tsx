@@ -100,6 +100,33 @@ export function LiveFaceAI() {
   useEffect(() => {
     langRef.current = lang;
   }, [lang]);
+
+  // ── Spoken voice instructions (TTS) ──
+  const [ttsMuted, setTtsMuted] = useState<boolean>(false);
+  const [ttsVoiceLabel, setTtsVoiceLabel] = useState<string>("—");
+  useEffect(() => {
+    ttsSetMuted(ttsMuted);
+  }, [ttsMuted]);
+  useEffect(() => {
+    const refresh = () => {
+      const v = ttsGetVoice(langRef.current);
+      setTtsVoiceLabel(v ? `${v.name} · ${v.lang}` : "—");
+    };
+    refresh();
+    const off = ttsOnReady(refresh);
+    return () => { off(); ttsCancel(); };
+  }, []);
+  useEffect(() => {
+    const v = ttsGetVoice(lang);
+    setTtsVoiceLabel(v ? `${v.name} · ${v.lang}` : "—");
+  }, [lang]);
+  const sayKey = useCallback(
+    (k: Parameters<typeof t>[0], vars?: Record<string, string | number>) => {
+      if (ttsMuted) return;
+      try { ttsSpeak(t(k, langRef.current, vars), langRef.current); } catch { /* ignore */ }
+    },
+    [ttsMuted],
+  );
   const tx = useCallback(
     (k: Parameters<typeof t>[0], vars?: Record<string, string | number>) => t(k, lang, vars),
     [lang],
