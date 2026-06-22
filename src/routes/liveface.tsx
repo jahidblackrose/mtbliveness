@@ -1988,7 +1988,7 @@ function LivenessScreen({
         </div>
 
         {/* CAMERA CARD (right on desktop, below on mobile) */}
-        <div className="order-2 lg:order-2 lg:justify-self-end w-full">
+        <div className="order-2 w-full">
           <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-black aspect-[3/4] shadow-xl">
             <video
               ref={videoRef}
