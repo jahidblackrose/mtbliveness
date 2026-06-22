@@ -124,7 +124,7 @@ export function onSpeakingChange(l: (s: boolean) => void): () => void {
 }
 
 export function cancelSpeak(): void {
-  pending = null;
+  pending = [];
   if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
   if (!supported()) { setSpeaking(false); return; }
   try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
@@ -153,10 +153,9 @@ function speakNow(text: string, lang: Lang): void {
     u.onstart = () => setSpeaking(true);
     const finish = () => {
       setSpeaking(false);
-      // Drain at most one queued utterance, after a small gap.
-      if (pending && !muted) {
-        const next = pending;
-        pending = null;
+      // Drain next queued utterance after a natural gap.
+      if (pending.length && !muted) {
+        const next = pending.shift()!;
         if (pendingTimer) { clearTimeout(pendingTimer); }
         pendingTimer = setTimeout(() => {
           pendingTimer = null;
@@ -173,8 +172,8 @@ function speakNow(text: string, lang: Lang): void {
 
 /**
  * Speak a sentence. Fire-and-forget; never throws and never blocks.
- * Queues at most ONE pending utterance (the latest) so messages don't get
- * cut off mid-word, but also don't pile up.
+ * If something is already speaking, the newest request REPLACES any
+ * existing single-item queue so messages don't pile up or get cut off.
  * De-dupes the same string within 1.2s to avoid repeats from re-renders.
  */
 export function speak(text: string, lang: Lang): void {
@@ -186,21 +185,45 @@ export function speak(text: string, lang: Lang): void {
   lastSpoken = trimmed;
   lastSpokenAt = now;
   if (speaking) {
-    // Replace any older queued item with the newest request.
-    pending = { text: trimmed, lang };
+    pending = [{ text: trimmed, lang }];
     return;
   }
   speakNow(trimmed, lang);
 }
 
 /**
- * Wait until the current (and any single queued) utterance finishes plus a
- * small gap. Resolves immediately if nothing is speaking, or after
- * TTS_MAX_WAIT_MS as a safety cap so callers never hang.
+ * Speak a SEQUENCE of lines back-to-back with TTS_GAP_MS between each.
+ * Use for the 3-beat handoff: success ack → transition cue → new instruction.
+ * Cancels any currently-pending single utterance so the sequence is atomic.
+ */
+export function speakSequence(items: Array<{ text: string; lang: Lang }>): void {
+  if (!supported() || muted) return;
+  const cleaned = items
+    .map((i) => ({ text: (i.text || "").trim(), lang: i.lang }))
+    .filter((i) => i.text.length > 0);
+  if (!cleaned.length) return;
+  // Reset dedup so the sequence's first line always speaks.
+  lastSpoken = "";
+  lastSpokenAt = 0;
+  const [first, ...rest] = cleaned;
+  pending = rest;
+  if (speaking) {
+    // Replace whatever was queued with our new sequence; current utterance
+    // finishes naturally, then onend drains our queue.
+    pending = cleaned;
+    return;
+  }
+  speakNow(first.text, first.lang);
+}
+
+/**
+ * Wait until the current and ALL queued utterances finish plus a small gap.
+ * Resolves immediately if nothing is speaking, or after maxWaitMs as a
+ * safety cap so callers never hang when speech is unavailable.
  */
 export function waitUntilSpoken(maxWaitMs: number = CONFIG.TTS_MAX_WAIT_MS): Promise<void> {
   if (!supported() || muted) return Promise.resolve();
-  if (!speaking && !pending) {
+  if (!speaking && pending.length === 0) {
     const sinceEnd = Date.now() - lastEndedAt;
     const wait = Math.max(0, CONFIG.TTS_GAP_MS - sinceEnd);
     return wait === 0 ? Promise.resolve() : new Promise((r) => setTimeout(r, wait));
@@ -215,9 +238,8 @@ export function waitUntilSpoken(maxWaitMs: number = CONFIG.TTS_MAX_WAIT_MS): Pro
       resolve();
     };
     const handler = () => {
-      // Wait the gap, then if nothing else queued/speaking, finish.
       setTimeout(() => {
-        if (!speaking && !pending) finish();
+        if (!speaking && pending.length === 0) finish();
       }, CONFIG.TTS_GAP_MS);
     };
     endListeners.add(handler);
