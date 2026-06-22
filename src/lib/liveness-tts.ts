@@ -14,6 +14,12 @@ type Listener = (voice: SpeechSynthesisVoice | null, lang: Lang) => void;
 let muted = false;
 let lastSpoken = "";
 let lastSpokenAt = 0;
+let speaking = false;
+let lastEndedAt = 0;
+let pending: { text: string; lang: Lang } | null = null;
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+const speakingListeners = new Set<(s: boolean) => void>();
+const endListeners = new Set<() => void>();
 const listeners = new Set<Listener>();
 const cache = new Map<Lang, SpeechSynthesisVoice | null>();
 
