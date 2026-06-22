@@ -47,11 +47,23 @@ function isFemale(name: string): boolean {
   return CONFIG.TTS_FEMALE_NAME_HINTS.some((h) => n.includes(h));
 }
 
+function qualityScore(name: string): number {
+  const n = name.toLowerCase();
+  let s = 0;
+  for (const h of CONFIG.TTS_QUALITY_NAME_HINTS) if (n.includes(h)) s += 1;
+  return s;
+}
+
 function pickFor(lang: Lang): SpeechSynthesisVoice | null {
   const voices = allVoices();
   if (!voices.length) return null;
   const prefer = lang === "bn" ? CONFIG.TTS_PREFER_LOCALES_BN : CONFIG.TTS_PREFER_LOCALES_EN;
   const norm = (s: string) => s.toLowerCase().replace("_", "-");
+  // Rank candidates by: female > not-male, then quality hint count.
+  const rank = (v: SpeechSynthesisVoice) =>
+    (isFemale(v.name) ? 100 : 0) +
+    (CONFIG.TTS_MALE_NAME_HINTS.some((h) => v.name.toLowerCase().includes(h)) ? -50 : 0) +
+    qualityScore(v.name) * 10;
   for (const loc of prefer) {
     const l = loc.toLowerCase();
     const inLocale = voices.filter((v) => {
@@ -59,17 +71,13 @@ function pickFor(lang: Lang): SpeechSynthesisVoice | null {
       return vl === l || vl.startsWith(l + "-") || vl.startsWith(l);
     });
     if (!inLocale.length) continue;
-    const female = inLocale.find((v) => isFemale(v.name));
-    if (female) return female;
-    // skip known males then accept first
-    const notMale = inLocale.find(
-      (v) => !CONFIG.TTS_MALE_NAME_HINTS.some((h) => v.name.toLowerCase().includes(h)),
-    );
-    return notMale ?? inLocale[0];
+    const sorted = [...inLocale].sort((a, b) => rank(b) - rank(a));
+    return sorted[0];
   }
-  // last-resort: any female voice, else first available
-  const anyFemale = voices.find((v) => isFemale(v.name));
-  return anyFemale ?? voices[0] ?? null;
+  // last-resort: any female voice (highest quality), else first available
+  const females = voices.filter((v) => isFemale(v.name));
+  if (females.length) return females.sort((a, b) => qualityScore(b.name) - qualityScore(a.name))[0];
+  return voices[0] ?? null;
 }
 
 function resolveVoice(lang: Lang): SpeechSynthesisVoice | null {
