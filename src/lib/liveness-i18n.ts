@@ -234,7 +234,62 @@ export const STRINGS = {
     bn: "এই সংখ্যাগুলো জোরে পড়ুন: {digits}",
     en: "Read these numbers aloud: {digits}",
   },
+
+  // ── Human-verifier voice script (spoken only) ──
+  // Warm greeting at the very first challenge.
+  greeting: {
+    bn: "চলুন যাচাই করি এটা সত্যিই আপনি। একটু সময় লাগবে।",
+    en: "Let's verify it's really you. This will only take a moment.",
+  },
+  // Brief transition cue between challenges.
+  transitionCue: { bn: "এবার পরেরটি…", en: "Now, next…" },
+  // Encouraging nudge after ASSIST_AFTER_MS (not scolding).
+  almostThere: { bn: "প্রায় হয়ে গেছে — আর একটু।", en: "Almost there — a little more." },
+  // Success confirmations after each passed challenge (rotated).
+  successAck1: { bn: "চমৎকার।", en: "Great." },
+  successAck2: { bn: "ঠিক আছে।", en: "Perfect." },
+  successAck3: { bn: "খুব ভালো।", en: "Well done." },
+  successAck4: { bn: "হয়ে গেছে।", en: "Got it." },
+  // Final ack after the LAST challenge passes.
+  finalAck: {
+    bn: "সব হয়ে গেছে — এবার সোজা ক্যামেরার দিকে তাকান।",
+    en: "All done — now look straight at the camera.",
+  },
+  // Spoken-only friendly variants per challenge. Screen text stays short
+  // (CHALLENGE_KEY), the SPOKEN line is warmer.
+  speakBlink: { bn: "এবার দয়া করে দুইবার চোখের পলক ফেলুন।", en: "Now, please blink twice for me." },
+  speakSmile: { bn: "এবার একটু হাসুন।", en: "Lovely — now give me a little smile." },
+  speakMouthOpen: { bn: "এবার মুখটা বড় করে হাঁ করুন।", en: "Now open your mouth wide, please." },
+  speakTurnLeft: { bn: "আস্তে করে মাথাটা বাঁ দিকে ঘোরান।", en: "Gently turn your head to your left." },
+  speakTurnRight: { bn: "এবার আস্তে করে ডান দিকে ঘোরান।", en: "And now gently to your right." },
+  speakLookUp: { bn: "এবার আস্তে করে মাথাটা উপরে তুলুন।", en: "Now gently tilt your head up." },
+  speakLookDown: { bn: "এবার আস্তে করে মাথাটা নিচে নামান।", en: "Now gently tilt your head down." },
+  speakNod: { bn: "মাথাটা একবার উপরে-নিচে করুন।", en: "Now nod your head up and down once." },
+  speakLookStraight: {
+    bn: "চমৎকার। এবার সোজা ক্যামেরার দিকে তাকিয়ে স্থির থাকুন।",
+    en: "Perfect. Now look straight at the camera and hold still.",
+  },
 } as const satisfies Record<string, Pair>;
+
+// Random success-ack picker (rotates across 4 lines per language).
+const ACK_KEYS = ["successAck1", "successAck2", "successAck3", "successAck4"] as const;
+export function pickSuccessAck(lang: Lang): string {
+  const k = ACK_KEYS[Math.floor(Math.random() * ACK_KEYS.length)];
+  return STRINGS[k][lang];
+}
+
+// Map each challenge to its spoken (warmer) variant key.
+// Falls back to the on-screen instruction if not listed.
+export const CHALLENGE_SPEAK_KEY: Partial<Record<ChallengeKind, StringKey>> = {
+  blink: "speakBlink",
+  smile: "speakSmile",
+  mouthOpen: "speakMouthOpen",
+  turnLeft: "speakTurnLeft",
+  turnRight: "speakTurnRight",
+  lookUp: "speakLookUp",
+  lookDown: "speakLookDown",
+  nod: "speakNod",
+};
 
 
 

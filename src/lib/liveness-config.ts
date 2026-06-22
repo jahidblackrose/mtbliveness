@@ -108,13 +108,19 @@ export const CONFIG = {
   // TTS API (Google/Azure/ElevenLabs). Not implemented now.
   TTS_ENABLED: true,
   TTS_RATE: 0.98, // legacy fallback; per-language rates below take precedence
-  TTS_RATE_EN: 0.85,
-  TTS_RATE_BN: 0.9,
-  TTS_GAP_MS: 400,
-  TTS_MAX_WAIT_MS: 3000,
-  TTS_PITCH: 1.0,
+  TTS_RATE_EN: 0.9,
+  TTS_RATE_BN: 0.92,
+  TTS_GAP_MS: 600,
+  TTS_MAX_WAIT_MS: 3500,
+  TTS_PITCH: 1.05,
   TTS_PREFER_LOCALES_BN: ["bn-BD", "bn-IN", "bn", "hi-IN"] as const,
   TTS_PREFER_LOCALES_EN: ["en-IN", "en-SG", "en-PH", "en-HK", "en-AU", "en-GB", "en-US", "en"] as const,
+  // Among matching voices, prefer higher-quality engines (neural/premium).
+  // NOTE: Web Speech voices are device-dependent and often robotic. The
+  // recommended upgrade for a truly natural human voice is pre-recorded
+  // female-Asian clips (one set per language for the ~15 fixed lines) or a
+  // neural cloud TTS (ElevenLabs / Google / Azure). Not implemented now.
+  TTS_QUALITY_NAME_HINTS: ["google", "neural", "premium", "enhanced", "natural", "wavenet"] as const,
   TTS_FEMALE_NAME_HINTS: [
     "female", "woman",
     "heera", "kalpana", "swara", "aditi", "raveena", "veena", "priya", "neerja", "asha",
