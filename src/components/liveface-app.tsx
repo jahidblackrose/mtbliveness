@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaceLandmarker,
@@ -53,20 +53,6 @@ import {
   type SpoofFlag,
 } from "@/lib/liveness-pad";
 
-export const Route = createFileRoute("/liveface")({
-  ssr: false,
-  head: () => ({
-    meta: [
-      { title: "LiveFaceAI — Browser-based face liveness" },
-      {
-        name: "description",
-        content:
-          "On-device active face liveness with Bangla & English support. Nothing is uploaded — your photo never leaves the browser.",
-      },
-    ],
-  }),
-  component: LiveFaceAI,
-});
 
 import { API_ENDPOINT, API_KEY, CONFIG } from "@/lib/liveness-config";
 import {
@@ -100,7 +86,7 @@ function pickVideoMime(): string | undefined {
 type VideoChunk = { ts: number; blob: Blob };
 
 
-function LiveFaceAI() {
+export function LiveFaceAI() {
   const [lang, setLang] = useState<Lang>("bn");
   const langRef = useRef<Lang>("bn");
   useEffect(() => {
