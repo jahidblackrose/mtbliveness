@@ -294,6 +294,29 @@ export function LiveFaceAI() {
     try { ttsSpeak(localized, lang); } catch { /* ignore */ }
   }, [bigCountdown, lang, ttsMuted]);
 
+  // Speak the active challenge prompt whenever the step/sub-step changes.
+  // For randomSequence we speak each sub-step (not the crammed sentence).
+  // Suppress TTS for the readDigits challenge when the mic is on, so the
+  // app's own voice isn't captured into the audio track.
+  const activeForTts = challengeView[activeIdx];
+  const activeKindForTts = activeForTts?.kind;
+  const activeSubKindForTts = activeForTts?.seqSubState?.kind;
+  useEffect(() => {
+    if (step !== "liveness") return;
+    if (captureSeq !== "idle") return;
+    if (!activeKindForTts) return;
+    const voiceMicOn = sessionParamsRef.current.enableVoice === true;
+    if (activeKindForTts === "readDigits" && voiceMicOn) {
+      ttsCancel();
+      return;
+    }
+    const speakKind = activeKindForTts === "randomSequence" ? activeSubKindForTts : activeKindForTts;
+    if (!speakKind) return;
+    const k = CHALLENGE_KEY[speakKind];
+    if (k) sayKey(k);
+  }, [step, captureSeq, activeKindForTts, activeSubKindForTts, sayKey]);
+
+
   const [liveReadout, setLiveReadout] = useState({
     blink: 0,
     smile: 0,
