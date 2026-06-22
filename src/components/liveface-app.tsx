@@ -271,6 +271,29 @@ export function LiveFaceAI() {
   const lastFramingOkRef = useRef(false);
   const captureIntervalRef = useRef<number | null>(null);
 
+  // ── TTS: speak instructions on key state transitions ──
+  // (additive; never blocks frame loop; fire-and-forget)
+  useEffect(() => {
+    if (step === "framing") sayKey("center");
+    else if (step === "calibrating") sayKey("holdStillEllipsis");
+    else if (step === "start" || step === "result" || step === "error" || step === "blocked") ttsCancel();
+  }, [step, sayKey]);
+  useEffect(() => {
+    if (step !== "liveness") return;
+    if (captureSeq === "success") sayKey("allDone");
+    else if (captureSeq === "lookStraight") sayKey("lookStraight");
+    else if (captureSeq === "capturing") sayKey("capturing");
+  }, [captureSeq, step, sayKey]);
+  useEffect(() => {
+    if (bigCountdown == null) return;
+    if (ttsMuted) return;
+    // Speak the number in the active language (e.g. "৩"/"3").
+    const localized = lang === "bn"
+      ? String(bigCountdown).replace(/\d/g, (d) => "০১২৩৪৫৬৭৮৯"[Number(d)])
+      : String(bigCountdown);
+    try { ttsSpeak(localized, lang); } catch { /* ignore */ }
+  }, [bigCountdown, lang, ttsMuted]);
+
   const [liveReadout, setLiveReadout] = useState({
     blink: 0,
     smile: 0,
