@@ -5,7 +5,15 @@ import {
   FilesetResolver,
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
-import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, X } from "lucide-react";
+import { Camera, CheckCircle2, Languages, Pause, Play, RotateCcw, ShieldCheck, Settings, Volume2, VolumeX, X } from "lucide-react";
+import {
+  speak as ttsSpeak,
+  cancelSpeak as ttsCancel,
+  setMuted as ttsSetMuted,
+  getSelectedVoice as ttsGetVoice,
+  listVoices as ttsListVoices,
+  onVoicesReady as ttsOnReady,
+} from "@/lib/liveness-tts";
 import { Button } from "@/components/ui/button";
 import {
   type ChallengeState,
