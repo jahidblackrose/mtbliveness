@@ -1467,7 +1467,19 @@ export function LiveFaceAI() {
             <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
             <h1 className="text-lg font-semibold tracking-tight">{tx("appName")}</h1>
           </div>
-          <LangToggle lang={lang} onChange={setLang} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTtsMuted((v) => !v)}
+              aria-pressed={ttsMuted}
+              aria-label={ttsMuted ? "Unmute voice instructions" : "Mute voice instructions"}
+              title={ttsMuted ? "Voice off" : "Voice on"}
+              className="inline-flex items-center gap-1 rounded-full border border-zinc-700/60 bg-zinc-900/60 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+            >
+              {ttsMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </button>
+            <LangToggle lang={lang} onChange={setLang} />
+          </div>
         </header>
 
         {step === "start" && (
