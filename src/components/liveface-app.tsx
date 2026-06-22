@@ -1482,6 +1482,33 @@ export function LiveFaceAI() {
           </div>
         </header>
 
+        {isDev && (
+          <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-[10px] text-zinc-400">
+            <div className="flex items-center justify-between gap-2">
+              <span>TTS voice: <span className="text-zinc-200">{ttsVoiceLabel}</span></span>
+              <button
+                type="button"
+                onClick={() => {
+                  try { ttsCancel(); } catch { /* ignore */ }
+                  try { ttsSpeak(t("center", lang), lang); } catch { /* ignore */ }
+                }}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-200 hover:bg-zinc-800"
+              >
+                Test speak
+              </button>
+            </div>
+            <details className="mt-1">
+              <summary className="cursor-pointer">All voices ({ttsListVoices().length})</summary>
+              <ul className="mt-1 max-h-24 overflow-y-auto pl-3">
+                {ttsListVoices().map((v) => (
+                  <li key={`${v.name}-${v.lang}`}>{v.name} · {v.lang}</li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        )}
+
+
         {step === "start" && (
           <StartScreen
             onStart={requestStart}
