@@ -2155,14 +2155,12 @@ function ResultScreen({
         <p className="text-sm font-medium">{tx("captureSuccess")}</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
-          <img
-            src={photoUrl}
-            alt={tx("capturedAlt")}
-            className="aspect-[3/4] w-full object-cover"
-          />
-        </div>
+      <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-black">
+        <img
+          src={photoUrl}
+          alt={tx("capturedAlt")}
+          className="aspect-[3/4] w-full object-cover"
+        />
       </div>
 
       <p className="text-[11px] text-zinc-500">
