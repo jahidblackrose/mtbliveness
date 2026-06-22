@@ -283,8 +283,8 @@ export function LiveFaceAI() {
   }, [step, sayKey]);
   useEffect(() => {
     if (step !== "liveness") return;
-    if (captureSeq === "success") sayKey("allDone");
-    else if (captureSeq === "lookStraight") sayKey("lookStraight");
+    if (captureSeq === "success") sayKey("finalAck");
+    else if (captureSeq === "lookStraight") sayKey("speakLookStraight");
     else if (captureSeq === "capturing") sayKey("capturing");
   }, [captureSeq, step, sayKey]);
   useEffect(() => {
@@ -297,10 +297,13 @@ export function LiveFaceAI() {
     try { ttsSpeak(localized, lang); } catch { /* ignore */ }
   }, [bigCountdown, lang, ttsMuted]);
 
-  // Speak the active challenge prompt whenever the step/sub-step changes.
-  // For randomSequence we speak each sub-step (not the crammed sentence).
-  // Suppress TTS for the readDigits challenge when the mic is on, so the
-  // app's own voice isn't captured into the audio track.
+  // ── Human-verifier 3-beat handoff between challenges ──
+  // First challenge:        greeting → instruction
+  // Subsequent challenges:  successAck → "Now, next…" → instruction
+  // Same index (e.g. randomSequence sub-step change): instruction only.
+  // For readDigits with the mic on, suppress TTS entirely so the app's own
+  // voice isn't recorded into the audio track.
+  const lastSpokenIdxRef = useRef<number>(-1);
   const activeForTts = challengeView[activeIdx];
   const activeKindForTts = activeForTts?.kind;
   const activeSubKindForTts = activeForTts?.seqSubState?.kind;
@@ -308,6 +311,7 @@ export function LiveFaceAI() {
     if (step !== "liveness") return;
     if (captureSeq !== "idle") return;
     if (!activeKindForTts) return;
+    if (ttsMuted) return;
     const voiceMicOn = sessionParamsRef.current.enableVoice === true;
     if (activeKindForTts === "readDigits" && voiceMicOn) {
       ttsCancel();
@@ -315,9 +319,37 @@ export function LiveFaceAI() {
     }
     const speakKind = activeKindForTts === "randomSequence" ? activeSubKindForTts : activeKindForTts;
     if (!speakKind) return;
-    const k = CHALLENGE_KEY[speakKind];
-    if (k) sayKey(k);
-  }, [step, captureSeq, activeKindForTts, activeSubKindForTts, sayKey]);
+    const instrKey = CHALLENGE_SPEAK_KEY[speakKind] ?? CHALLENGE_KEY[speakKind];
+    if (!instrKey) return;
+    const L = langRef.current;
+    const instruction = t(instrKey, L);
+    try {
+      if (lastSpokenIdxRef.current === activeIdx) {
+        // Same challenge, sub-step change → speak instruction only.
+        ttsSpeak(instruction, L);
+      } else if (lastSpokenIdxRef.current < 0) {
+        // First challenge of the session → warm greeting + instruction.
+        ttsSpeakSequence([
+          { text: t("greeting", L), lang: L },
+          { text: instruction, lang: L },
+        ]);
+      } else {
+        // Advanced to a new challenge → success ack + transition + new instruction.
+        ttsSpeakSequence([
+          { text: pickSuccessAck(L), lang: L },
+          { text: t("transitionCue", L), lang: L },
+          { text: instruction, lang: L },
+        ]);
+      }
+    } catch { /* ignore */ }
+    lastSpokenIdxRef.current = activeIdx;
+  }, [step, captureSeq, activeIdx, activeKindForTts, activeSubKindForTts, ttsMuted]);
+
+  // Reset the handoff tracker when leaving the liveness step so the next
+  // run begins with a fresh greeting.
+  useEffect(() => {
+    if (step !== "liveness") lastSpokenIdxRef.current = -1;
+  }, [step]);
 
 
   const [liveReadout, setLiveReadout] = useState({
