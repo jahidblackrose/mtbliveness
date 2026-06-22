@@ -47,10 +47,12 @@ import {
 } from "@/lib/liveness";
 import {
   CHALLENGE_KEY,
+  CHALLENGE_SPEAK_KEY,
   GUIDANCE_KEY,
   type Lang,
   t,
   actionShort,
+  pickSuccessAck,
 } from "@/lib/liveness-i18n";
 import { ChallengeDemo } from "@/components/challenge-demo";
 import { getPoseDetector, analyseShoulders, type UpperBodyInfo } from "@/lib/liveness-pose";
