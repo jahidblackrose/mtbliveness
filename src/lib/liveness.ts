@@ -711,8 +711,6 @@ export function updateChallenge(
         poseProgress: progress,
         nodPhase: debug.pass ? "neutral" : state.nodPhase,
         nodPitchEma: debug.pitchChange,
-        blinkCount: debug.pass ? 1 : state.blinkCount ?? 0,
-        blinkLastCountedAt: debug.pass ? now : state.blinkLastCountedAt,
         wrongWay: !!debug.wrongHint,
         wrongHint: debug.wrongHint,
         startedNearNeutral: neutralReady,
