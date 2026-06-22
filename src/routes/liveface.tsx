@@ -1168,7 +1168,7 @@ function LiveFaceAI() {
               const L = langRef.current;
 
               // Auto-hint after first timeout on this challenge.
-              setHintText(t(hintKeyFor(cur.kind) as Parameters<typeof t>[0], L));
+              setHintText(t(hintKeyFor(cur.kind, cur.seqSubState?.kind) as Parameters<typeof t>[0], L));
 
               // Enable easy mode immediately after the first miss.
               if (a >= 1 && !EASY.on) {
