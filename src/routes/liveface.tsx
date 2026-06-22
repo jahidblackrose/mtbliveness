@@ -1392,7 +1392,7 @@ function LiveFaceAI() {
             : "'Inter', system-ui, sans-serif",
       }}
     >
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6 lg:max-w-5xl lg:px-6">
+      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
         <header className="flex items-center justify-between gap-2 pb-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-emerald-400" aria-hidden="true" />
